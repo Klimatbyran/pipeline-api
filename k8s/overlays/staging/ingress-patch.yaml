@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pipeline-api
+  namespace: pipeline-api-stage
+spec:
+  tls:
+    - secretName: stage-api-pipeline-myapp-com-tls
+      hosts:
+        - stage-api.pipeline.myapp.com
+  rules:
+    - host: stage-api.pipeline.myapp.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pipeline-api
+                port:
+                  number: 80
