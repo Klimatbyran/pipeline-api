@@ -7,4 +7,4 @@ patches:
   - path: ingress-patch.yaml
 images:
   - name: ghcr.io/klimatbyran/pipeline-api
-    newTag: '1.0.1-rc.0' # {"$imagepolicy": "flux-system:pipeline-api-stage:tag"}
+    newTag: '0.0.1' # {"$imagepolicy": "flux-system:pipeline-api-stage:tag"}
