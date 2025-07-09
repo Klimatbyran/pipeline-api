@@ -13,8 +13,5 @@ COPY . .
 EXPOSE 4000
 ENV PORT=4000
 
-# Install only production dependencies
-# Build the TypeScript application
-RUN npm run build
 # Start the Node.js application in prod mode
 CMD ["npm", "start"]
