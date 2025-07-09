@@ -5,12 +5,13 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: 'letsencrypt-prod'
 spec:
+  ingressClassName: nginx
   tls:
     - hosts:
-        - api.pipeline.myapp.com
-      secretName: pipeline-api-tls
+        - stage-pipeline-api.klimatkollen.se
+      secretName: stage-pipeline-api-tls
   rules:
-    - host: api.pipeline.myapp.com
+    - host: stage-pipeline-api.klimatkollen.se
       http:
         paths:
           - path: /
@@ -19,4 +20,4 @@ spec:
               service:
                 name: pipeline-api
                 port:
-                  number: 80
+                  number: 4000
