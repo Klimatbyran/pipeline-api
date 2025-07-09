@@ -5,10 +5,10 @@ metadata:
 spec:
   tls:
     - hosts:
-        - api.pipeline.myapp.com
-      secretName: api-pipeline-myapp-com-tls
+        - pipeline-api.klimatkollen.se
+      secretName: pipeline-api-tls
   rules:
-    - host: api.pipeline.myapp.com
+    - host: pipeline-api.klimatkollen.se
       http:
         paths:
           - path: /
@@ -17,4 +17,4 @@ spec:
               service:
                 name: pipeline-api
                 port:
-                  number: 80
+                  number: 4000

@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipeline-api
+  labels:
+    app: pipeline-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: pipeline-api
+  template:
+    metadata:
+      labels:
+        app: pipeline-api
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: pipeline-api
+          image: ghcr.io/klimatbyran/pipeline-api
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1024Mi"
+              cpu: "500m"
+          ports:
+            - containerPort: 4000
+          env:
+            - name: API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: env
+                  key: API_SECRET
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis
+                  key: redis-password
+            - name: REDIS_HOST
+              value: redis-master.garbo-stage.svc.cluster.local
