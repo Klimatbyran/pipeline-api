@@ -63,6 +63,21 @@ async function startApp() {
     }
   });
 
+  app.route({
+    url: "/api/export/openapi.json",
+    method: "GET",
+    schema: {
+      description: "Export OpenAPI specification as JSON",
+      tags: ["System"],
+      response: {
+        200: z.any()
+      }
+    },
+    handler: async (request, reply) => {
+      return app.swagger();
+    }
+  });
+
   app.register(readQueuesRoute, {
     prefix: '/api/queues',
   })
