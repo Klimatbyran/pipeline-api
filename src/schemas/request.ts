@@ -22,7 +22,11 @@ export const readQueueJobPathParamsSchema = z.object({
     id: z.string()
 });
 
+// Accept both camelCase and kebab-case for the reindex flag.
+// Normalization to camelCase is done in the route handler to avoid schema transforms
+// that can accidentally mark fields as required in JSON schema.
 export const addQueueJobBodySchema = z.object({
     autoApprove: z.boolean().optional().default(false),
     urls: z.array(string().url()),
+    forceReindex: z.boolean().optional().describe('Re-index markdown even if already indexed'),
 }).required();

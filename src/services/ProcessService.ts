@@ -24,6 +24,9 @@ export class ProcessService {
 
     public async getProcesses(): Promise<Process[]> {
         const jobs = await this.queueService.getDataJobs(undefined, undefined);
+        // Debug: log number of jobs fetched across all queues
+        // Using console here; Fastify logger isn't directly available in service layer
+        console.info('[ProcessService] getProcesses: jobs fetched', { count: jobs.length });
         const jobProcesses: Record<string, DataJob[]> = {};
         for(const job of jobs) {
             if(!jobProcesses[job.data.id ?? job.data.threadId ?? "unknown"]) {
@@ -35,6 +38,7 @@ export class ProcessService {
         for(const jobProcess of Object.values(jobProcesses)) {
             processes.push(this.createProcess(jobProcess));
         }
+        console.info('[ProcessService] getProcesses: processes built', { count: processes.length });
         return processes;
     }
 
@@ -55,7 +59,9 @@ export class ProcessService {
                     companyProcesses[company].wikidataId = process.wikidataId;    
                 }
             }
-            return Object.values(companyProcesses);
+            const grouped = Object.values(companyProcesses);
+            console.info('[ProcessService] getProcessesGroupedByCompany: companies grouped', { count: grouped.length });
+            return grouped;
         }
 
     private createProcess(jobs: DataJob[]): Process {

@@ -7,6 +7,7 @@ export const JOB_STATUS = ['active', 'waiting', 'waiting-children', 'prioritized
 export const QUEUE_NAMES = {
   NLM_PARSE_PDF: 'nlmParsePDF',
   DOCLING_PARSE_PDF: 'doclingParsePDF',
+  PARSE_PDF: 'parsePdf',
   NLM_EXTRACT_TABLES: 'nlmExtractTables',
   INDEX_MARKDOWN: 'indexMarkdown',
   PRECHECK: 'precheck',

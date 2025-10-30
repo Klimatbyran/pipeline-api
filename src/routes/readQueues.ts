@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyRequest } from "fastify";
 import { QueueService } from "../services/QueueService";
 import { AddJobBody, BaseJob } from "../schemas/types";
 import { error404ResponseSchema, queueAddJobResponseSchema, queueJobResponseSchema, queueResponseSchema, queueStatsResponseSchema } from "../schemas/response";
-import { JOB_STATUS, STATUS } from "../lib/bullmq";
+import { JOB_STATUS, STATUS, QUEUE_NAMES } from "../lib/bullmq";
 import { JobType } from "bullmq";
 import { addQueueJobBodySchema, readQueueJobPathParamsSchema, readQueuePathParamsSchema, readQueueQueryStringSchema, readQueueStatsQueryStringSchema } from "../schemas/request";
 
@@ -67,7 +67,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
     {
       schema: {
         summary: 'Add job to a queue',
-        description: '',
+        description: 'Enqueue one or more URLs into the specified queue. Optional flags include autoApprove and forceReindex (alias: force-reindex).',
         tags: ['Queues'],
         params: readQueuePathParamsSchema,
         body: addQueueJobBodySchema,
@@ -84,11 +84,28 @@ export async function readQueuesRoute(app: FastifyInstance) {
       reply
     ) => {
       const { name } = request.params;
-      const { urls, autoApprove} = request.body;
+      const resolvedName = Object.values(QUEUE_NAMES).find(q => q.toLowerCase() === name.toLowerCase());
+      if (!resolvedName) {
+        return reply.status(400).send({ error: `Unknown queue '${name}'. Valid queues: ${Object.values(QUEUE_NAMES).join(', ')}` });
+      }
+      const { urls, autoApprove } = request.body as any;
+      const forceReindex = typeof (request.body as any).forceReindex === 'boolean'
+        ? (request.body as any).forceReindex
+        : (typeof (request.body as any)['force-reindex'] === 'boolean' ? (request.body as any)['force-reindex'] : undefined);
+      // Log enqueue request (sanitized)
+      app.log.info(
+        {
+          queue: name,
+          urlsCount: Array.isArray(urls) ? urls.length : 0,
+          autoApprove: !!autoApprove,
+          forceReindex: !!forceReindex,
+        },
+        'Enqueue request received'
+      );
       const queueService = await QueueService.getQueueService();
       const addedJobs: BaseJob[] = [];
       for(const url of urls) {
-        const addedJob = await queueService.addJob(name, url, autoApprove);
+        const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex });
         addedJobs.push(addedJob);
       }
       return reply.send(addedJobs);
