@@ -96,7 +96,7 @@ export class QueueService {
             url: url.trim(),
             autoApprove,
             id,
-            ...(options?.forceReindex !== undefined ? { forceReindex: options.forceReindex } : {})
+            ...(options?.forceReindex !== undefined && { forceReindex: options.forceReindex })
         });
         return transformJobtoBaseJob(job);
     }
