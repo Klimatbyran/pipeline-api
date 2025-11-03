@@ -91,7 +91,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
       const { urls, autoApprove } = request.body as any;
       const forceReindex = typeof (request.body as any).forceReindex === 'boolean'
         ? (request.body as any).forceReindex
-        : (typeof (request.body as any)['force-reindex'] === 'boolean' ? (request.body as any)['force-reindex'] : undefined);
+        : undefined;
       // Log enqueue request (sanitized)
       app.log.info(
         {
