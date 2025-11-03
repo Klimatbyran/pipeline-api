@@ -1,6 +1,6 @@
 {
   "name": "pipeline-status",
-  "version": "0.0.2-rc.4",
+  "version": "0.0.2-rc.5",
   "scripts": {
     "build": "tsc",
     "start": "node --import tsx src/index.ts",
