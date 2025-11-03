@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyRequest } from "fastify";
 import { QueueService } from "../services/QueueService";
 import { AddJobBody, BaseJob } from "../schemas/types";
 import { error404ResponseSchema, queueAddJobResponseSchema, queueJobResponseSchema, queueResponseSchema, queueStatsResponseSchema } from "../schemas/response";
-import { JOB_STATUS, STATUS, QUEUE_NAMES } from "../lib/bullmq";
+import { STATUS, QUEUE_NAMES } from "../lib/bullmq";
 import { JobType } from "bullmq";
 import { addQueueJobBodySchema, readQueueJobPathParamsSchema, readQueuePathParamsSchema, readQueueQueryStringSchema, readQueueStatsQueryStringSchema } from "../schemas/request";
 
