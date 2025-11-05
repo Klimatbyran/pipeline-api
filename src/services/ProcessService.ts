@@ -29,10 +29,11 @@ export class ProcessService {
         console.info('[ProcessService] getProcesses: jobs fetched', { count: jobs.length });
         const jobProcesses: Record<string, DataJob[]> = {};
         for(const job of jobs) {
-            if(!jobProcesses[job.data.id ?? job.data.threadId ?? "unknown"]) {
-                jobProcesses[job.data.id ?? job.data.threadId ?? "unknown"] = [];
+            const key = job.data.threadId ?? "unknown";
+            if(!jobProcesses[key]) {
+                jobProcesses[key] = [];
             }
-            jobProcesses[job.data.id ?? job.data.threadId ?? "unknown"].push(job);
+            jobProcesses[key].push(job);
         }
         const processes: Process[] = [];
         for(const jobProcess of Object.values(jobProcesses)) {
@@ -71,8 +72,8 @@ export class ProcessService {
         let year: number | undefined;
 
         for(const job of jobs) {
-            if(job.data.id || job.data.threadId) {
-                id = job.data.id || job.data.threadId;
+            if(job.data.threadId) {
+                id = job.data.threadId;
             }
             if(job.data.wikidata) {
                 wikidataId = job.data.wikidata.node;

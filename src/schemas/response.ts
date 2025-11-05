@@ -24,6 +24,7 @@ export const baseJobSchema = z.object({
     autoApprove: z.boolean().optional().default(false),
     timestamp: z.number(),
     processId: z.string().optional(),
+    threadId: z.string().optional(),
     queue: z.string(),
     processedBy: z.string().optional(),
     finishedOn: z.number().optional(),
