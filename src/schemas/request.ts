@@ -29,4 +29,5 @@ export const addQueueJobBodySchema = z.object({
     autoApprove: z.boolean().optional().default(false),
     urls: z.array(string().url()),
     forceReindex: z.boolean().optional().describe('Re-index markdown even if already indexed'),
-}).required();
+    threadId: z.string().optional(),
+});

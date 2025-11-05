@@ -49,7 +49,7 @@ export class QueueService {
             const rawJobs = await queue.getJobs(queryStatus as JobType[]);
             const filteredRawJobs = processId
                 ? rawJobs.filter(job => {
-                    const pid = job.data?.runId ?? job.data?.id ?? job.data?.threadId;
+                    const pid = job.data?.threadId;
                     return pid === processId;
                 })
                 : rawJobs;
@@ -72,7 +72,7 @@ export class QueueService {
             const rawJobs = await queue.getJobs(queryStatus as JobType[]);
             const filteredRawJobs = processId
                 ? rawJobs.filter(job => {
-                    const pid = job.data?.runId ?? job.data?.id ?? job.data?.threadId;
+                    const pid = job.data?.threadId;
                     return pid === processId;
                 })
                 : rawJobs;
@@ -89,14 +89,15 @@ export class QueueService {
         return jobs;
     }
 
-    public async addJob(queueName: string, url: string, autoApprove: boolean = false, options?: { forceReindex?: boolean }): Promise<BaseJob> {
+    public async addJob(queueName: string, url: string, autoApprove: boolean = false, options?: { forceReindex?: boolean; threadId?: string }): Promise<BaseJob> {
         const queue = await this.getQueue(queueName);
         const id = crypto.randomUUID();
         const job = await queue.add('download ' + url.slice(-20), {
             url: url.trim(),
             autoApprove,
             id,
-            ...(options?.forceReindex !== undefined && { forceReindex: options.forceReindex })
+            ...(options?.threadId ? { threadId: options.threadId } : {}),
+            ...(options?.forceReindex !== undefined ? { forceReindex: options.forceReindex } : {})
         });
         return transformJobtoBaseJob(job);
     }
@@ -136,7 +137,8 @@ export async function transformJobtoBaseJob(job: Job): Promise<BaseJob> {
         id: job.id,
         url: job.data.url ?? undefined,
         autoApprove: job.data.autoApprove ?? false,
-        processId: job.data.id ?? job.data.threadId ?? undefined,
+        processId: job.data.threadId ?? undefined,
+        threadId: job.data.threadId ?? undefined,
         timestamp: job.timestamp,
         processedBy: job.processedBy,
         finishedOn: job.finishedOn,
