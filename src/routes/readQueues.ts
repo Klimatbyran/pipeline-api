@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
+import { randomUUID } from "crypto";
 import { QueueService } from "../services/QueueService";
 import { AddJobBody, BaseJob } from "../schemas/types";
 import { error404ResponseSchema, queueAddJobResponseSchema, queueJobResponseSchema, queueResponseSchema, queueStatsResponseSchema } from "../schemas/response";
@@ -88,10 +89,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
       if (!resolvedName) {
         return reply.status(400).send({ error: `Unknown queue '${name}'. Valid queues: ${Object.values(QUEUE_NAMES).join(', ')}` });
       }
-      const { urls, autoApprove, forceReindex, threadId, replaceAllEmissions, runOnly } = request.body as any;
-     
-      // Resolve threadId: accept provided threadId/runId or generate a new one
-      const providedOrCreatedThreadId = threadId || `run_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+      const { urls, autoApprove, forceReindex, replaceAllEmissions, runOnly } = request.body as any;
       // Log enqueue request (sanitized)
       app.log.info(
         {
@@ -107,7 +105,9 @@ export async function readQueuesRoute(app: FastifyInstance) {
       const queueService = await QueueService.getQueueService();
       const addedJobs: BaseJob[] = [];
       for(const url of urls) {
-        const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: providedOrCreatedThreadId, replaceAllEmissions, runOnly });
+        // Generate a unique threadId for each URL; client-provided threadId is ignored
+        const perUrlThreadId = randomUUID();
+        const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: perUrlThreadId, replaceAllEmissions, runOnly });
         addedJobs.push(addedJob);
       }
       return reply.send(addedJobs);
