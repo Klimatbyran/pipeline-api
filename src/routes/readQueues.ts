@@ -67,7 +67,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
     {
       schema: {
         summary: 'Add job to a queue',
-        description: 'Enqueue one or more URLs into the specified queue. Optional flags include autoApprove and forceReindex (alias: force-reindex).',
+        description: 'Enqueue one or more URLs into the specified queue. Optional flags include autoApprove, replaceAllEmissions and forceReindex (alias: force-reindex).',
         tags: ['Queues'],
         params: readQueuePathParamsSchema,
         body: addQueueJobBodySchema,
@@ -88,7 +88,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
       if (!resolvedName) {
         return reply.status(400).send({ error: `Unknown queue '${name}'. Valid queues: ${Object.values(QUEUE_NAMES).join(', ')}` });
       }
-      const { urls, autoApprove, forceReindex, threadId } = request.body as any;
+      const { urls, autoApprove, forceReindex, threadId, replaceAllEmissions } = request.body as any;
      
       // Resolve threadId: accept provided threadId/runId or generate a new one
       const providedOrCreatedThreadId = threadId || `run_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
@@ -99,13 +99,14 @@ export async function readQueuesRoute(app: FastifyInstance) {
           urlsCount: Array.isArray(urls) ? urls.length : 0,
           autoApprove: !!autoApprove,
           forceReindex: !!forceReindex,
+          replaceAllEmissions: !!replaceAllEmissions,
         },
         'Enqueue request received'
       );
       const queueService = await QueueService.getQueueService();
       const addedJobs: BaseJob[] = [];
       for(const url of urls) {
-        const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: providedOrCreatedThreadId });
+        const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: providedOrCreatedThreadId, replaceAllEmissions });
         addedJobs.push(addedJob);
       }
       return reply.send(addedJobs);
