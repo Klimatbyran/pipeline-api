@@ -89,7 +89,7 @@ export class QueueService {
         return jobs;
     }
 
-    public async addJob(queueName: string, url: string, autoApprove: boolean = false, options?: { forceReindex?: boolean; threadId?: string; replaceAllEmissions?: boolean }): Promise<BaseJob> {
+    public async addJob(queueName: string, url: string, autoApprove: boolean = false, options?: { forceReindex?: boolean; threadId?: string; replaceAllEmissions?: boolean; runOnly?: string[] }): Promise<BaseJob> {
         const queue = await this.getQueue(queueName);
         const id = crypto.randomUUID();
         const job = await queue.add('download ' + url.slice(-20), {
@@ -98,7 +98,8 @@ export class QueueService {
             id,
             ...(options?.threadId ? { threadId: options.threadId } : {}),
             ...(options?.forceReindex !== undefined ? { forceReindex: options.forceReindex } : {}),
-            ...(options?.replaceAllEmissions !== undefined ? { replaceAllEmissions: options.replaceAllEmissions } : {})
+            ...(options?.replaceAllEmissions !== undefined ? { replaceAllEmissions: options.replaceAllEmissions } : {}),
+            ...(options?.runOnly ? { runOnly: options.runOnly } : {})
         });
         return transformJobtoBaseJob(job);
     }
