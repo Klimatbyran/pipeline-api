@@ -30,4 +30,5 @@ export const addQueueJobBodySchema = z.object({
     urls: z.array(string().url()),
     forceReindex: z.boolean().optional().describe('Re-index markdown even if already indexed'),
     threadId: z.string().optional(),
+    replaceAllEmissions: z.boolean().optional().default(false).describe('Replace all scope 1,2,3 emissions and totals (delete old ones from all periods) before adding new ones')
 });
