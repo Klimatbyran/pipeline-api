@@ -29,7 +29,17 @@ export class ProcessService {
         console.info('[ProcessService] getProcesses: jobs fetched', { count: jobs.length });
         const jobProcesses: Record<string, DataJob[]> = {};
         for(const job of jobs) {
-            const key = job.data.threadId ?? "unknown";
+            // Group jobs by threadId if available, otherwise group by company name
+            // This prevents jobs from different companies without threadId from being grouped together
+            let key: string;
+            if(job.data.threadId) {
+                key = job.data.threadId;
+            } else {
+                // For jobs without threadId, create a unique key per company
+                // This ensures jobs from different companies are in separate processes
+                const companyName = job.data.companyName ?? "unknown";
+                key = `unknown-${companyName}`;
+            }
             if(!jobProcesses[key]) {
                 jobProcesses[key] = [];
             }
@@ -47,6 +57,7 @@ export class ProcessService {
             const processes = await this.getProcesses();
             const companyProcesses: Record<string, CompanyProcess> = {};
             for(const process of processes) {
+                // Use the process's company name, or "unknown" if not available
                 const company = process.company ?? "unknown";
                 if(companyProcesses[company]) {
                     companyProcesses[company].processes.push(process);
@@ -102,8 +113,11 @@ export class ProcessService {
             };
         })
 
+        // If no threadId, create a process id based on company name to keep them separate
+        const processId = id ?? (company ? `unknown-${company}` : "unknown");
+        
         const process: Process = {
-            id: id ?? "unknown",
+            id: processId,
             jobs,
             wikidataId,
             company,
