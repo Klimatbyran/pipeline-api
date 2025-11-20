@@ -32,3 +32,7 @@ export const addQueueJobBodySchema = z.object({
     replaceAllEmissions: z.boolean().optional().default(false).describe('Replace all scope 1,2,3 emissions and totals (delete old ones from all periods) before adding new ones'),
     runOnly: z.array(z.string()).optional().describe('Array of worker/queue names to run (limits pipeline execution to specified steps)')
 });
+
+export const rerunQueueJobBodySchema = z.object({
+    data: z.record(z.any()).optional().describe('Optional job data overrides. Will merge with existing job data before re-running'),
+});

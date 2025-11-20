@@ -2,6 +2,37 @@ import { Job, JobType, Queue } from "bullmq";
 import startQueues, { JOB_STATUS, QUEUE_NAMES, STATUS } from "../lib/bullmq";
 import { BaseJob, CompanyProcess, DataJob, Process, QueueStatus } from "../schemas/types";
 
+/**
+ * Deep merge two objects, recursively merging nested objects
+ */
+function deepMerge(target: Record<string, any>, source: Record<string, any>): Record<string, any> {
+    const output = { ...target };
+    
+    for (const key in source) {
+        if (source.hasOwnProperty(key)) {
+            const sourceValue = source[key];
+            const targetValue = target[key];
+            
+            // If both values are objects (and not arrays or null), merge them recursively
+            if (
+                sourceValue !== null &&
+                typeof sourceValue === 'object' &&
+                !Array.isArray(sourceValue) &&
+                targetValue !== null &&
+                typeof targetValue === 'object' &&
+                !Array.isArray(targetValue)
+            ) {
+                output[key] = deepMerge(targetValue, sourceValue);
+            } else {
+                // Otherwise, use the source value (or undefined to keep target)
+                output[key] = sourceValue !== undefined ? sourceValue : targetValue;
+            }
+        }
+    }
+    
+    return output;
+}
+
 export class QueueService {
     private static queueService: QueueService | undefined;
     private queues: Record<string, Queue> | undefined;
@@ -129,6 +160,62 @@ export class QueueService {
             })
         }
         return stats;
+    }
+
+    public async rerunJob(queueName: string, jobId: string, dataOverrides?: Record<string, any>): Promise<DataJob> {
+        console.info('[QueueService] rerunJob: Starting', { queueName, jobId, hasDataOverrides: !!dataOverrides && Object.keys(dataOverrides).length > 0 });
+        
+        const queue = await this.getQueue(queueName);
+        const job = await queue.getJob(jobId);
+        
+        if (!job) {
+            console.error('[QueueService] rerunJob: Job not found', { queueName, jobId });
+            throw new Error(`Job ${jobId} not found`);
+        }
+        
+        const currentState = await job.getState();
+        console.info('[QueueService] rerunJob: Job state', { queueName, jobId, currentState, jobName: job.name });
+        
+        // Update data if provided
+        if (dataOverrides && Object.keys(dataOverrides).length > 0) {
+            console.info('[QueueService] rerunJob: Updating job data', { queueName, jobId, dataOverrides });
+            const currentData = job.data;
+            // Use deep merge to preserve nested objects like approval
+            const updatedData = deepMerge(currentData, dataOverrides);
+            await job.updateData(updatedData);
+            console.info('[QueueService] rerunJob: Job data updated', { queueName, jobId });
+        }
+        
+        // Handle different states
+        if (currentState === 'delayed') {
+            console.info('[QueueService] rerunJob: Promoting delayed job', { queueName, jobId });
+            await job.promote();
+            const newState = await job.getState();
+            console.info('[QueueService] rerunJob: Job promoted', { queueName, jobId, previousState: currentState, newState });
+        } else if (currentState === 'failed') {
+            console.info('[QueueService] rerunJob: Retrying failed job', { queueName, jobId });
+            await job.retry();
+            const newState = await job.getState();
+            console.info('[QueueService] rerunJob: Job retried', { queueName, jobId, previousState: currentState, newState });
+        } else if (currentState === 'completed') {
+            console.info('[QueueService] rerunJob: Creating new job from completed job', { queueName, jobId, threadId: job.data?.threadId });
+            // For completed jobs, create new one with same data (preserving threadId)
+            const newJob = await queue.add(job.name, job.data);
+            console.info('[QueueService] rerunJob: New job created', { queueName, originalJobId: jobId, newJobId: newJob.id });
+            return this.getJobData(queueName, newJob.id!);
+        } else if (['waiting', 'active'].includes(currentState)) {
+            console.warn('[QueueService] rerunJob: Job already in runnable state', { queueName, jobId, currentState });
+            throw new Error(`Job is already ${currentState}. Cannot re-run.`);
+        } else {
+            console.info('[QueueService] rerunJob: Moving job to waiting', { queueName, jobId, currentState });
+            await job.moveToWaiting();
+            const newState = await job.getState();
+            console.info('[QueueService] rerunJob: Job moved to waiting', { queueName, jobId, previousState: currentState, newState });
+        }
+        
+        const finalJob = await this.getJobData(queueName, jobId);
+        console.info('[QueueService] rerunJob: Completed', { queueName, jobId, finalState: finalJob.status });
+        return finalJob;
     }
 }
 

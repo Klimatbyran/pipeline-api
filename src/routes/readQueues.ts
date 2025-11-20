@@ -5,7 +5,7 @@ import { AddJobBody, BaseJob } from "../schemas/types";
 import { error404ResponseSchema, queueAddJobResponseSchema, queueJobResponseSchema, queueResponseSchema, queueStatsResponseSchema } from "../schemas/response";
 import { STATUS, QUEUE_NAMES } from "../lib/bullmq";
 import { JobType } from "bullmq";
-import { addQueueJobBodySchema, readQueueJobPathParamsSchema, readQueuePathParamsSchema, readQueueQueryStringSchema, readQueueStatsQueryStringSchema } from "../schemas/request";
+import { addQueueJobBodySchema, readQueueJobPathParamsSchema, readQueuePathParamsSchema, readQueueQueryStringSchema, readQueueStatsQueryStringSchema, rerunQueueJobBodySchema } from "../schemas/request";
 
 export async function readQueuesRoute(app: FastifyInstance) {
   app.get(
@@ -168,6 +168,52 @@ export async function readQueuesRoute(app: FastifyInstance) {
       } catch (error) {
         return reply.status(404).send({ error: 'Job does not exist in this queue' })
       }     
+    }
+  );
+
+  app.post(
+    '/:name/:id/rerun',
+    {
+      schema: {
+        summary: 'Re-run a job (resume delayed job or retry failed job)',
+        description: 'Resumes a delayed job (e.g., approval pending) or retries a failed job. Optionally allows updating job data before re-running. For completed jobs, creates a new job with the same data.',
+        tags: ['Queues'],
+        params: readQueueJobPathParamsSchema,
+        body: rerunQueueJobBodySchema,
+        response: {
+          200: queueJobResponseSchema,
+          400: error404ResponseSchema,
+          404: error404ResponseSchema
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{
+        Params: {name: string, id: string},
+        Body: {
+          data?: Record<string, any>;
+        }
+      }>,
+      reply
+    ) => {
+      const { name, id } = request.params;
+      const { data: dataOverrides } = request.body;
+      
+      const queueService = await QueueService.getQueueService();
+      
+      try {
+        const updatedJob = await queueService.rerunJob(name, id, dataOverrides);
+        return reply.send(updatedJob);
+      } catch (error: any) {
+        if (error.message?.includes('not found')) {
+          return reply.status(404).send({ error: 'Job does not exist in this queue' });
+        }
+        if (error.message?.includes('already')) {
+          return reply.status(400).send({ error: error.message });
+        }
+        app.log.error(error, 'Error re-running job');
+        return reply.status(500).send({ error: 'Failed to re-run job' });
+      }
     }
   );
 }
