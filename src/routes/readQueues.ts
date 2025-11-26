@@ -5,7 +5,8 @@ import { AddJobBody, BaseJob } from "../schemas/types";
 import { error404ResponseSchema, queueAddJobResponseSchema, queueJobResponseSchema, queueResponseSchema, queueStatsResponseSchema } from "../schemas/response";
 import { STATUS, QUEUE_NAMES } from "../lib/bullmq";
 import { JobType } from "bullmq";
-import { addQueueJobBodySchema, readQueueJobPathParamsSchema, readQueuePathParamsSchema, readQueueQueryStringSchema, readQueueStatsQueryStringSchema, rerunQueueJobBodySchema } from "../schemas/request";
+import { addQueueJobBodySchema, readQueueJobPathParamsSchema, readQueuePathParamsSchema, readQueueQueryStringSchema, readQueueStatsQueryStringSchema, rerunJobsByWorkerBodySchema, rerunQueueJobBodySchema } from "../schemas/request";
+import { z } from "zod";
 
 export async function readQueuesRoute(app: FastifyInstance) {
   app.get(
@@ -214,6 +215,49 @@ export async function readQueuesRoute(app: FastifyInstance) {
         app.log.error(error, 'Error re-running job');
         return reply.status(500).send({ error: 'Failed to re-run job' });
       }
+    }
+  );
+
+  app.post(
+    '/rerun-by-worker',
+    {
+      schema: {
+        summary: 'Re-run all jobs that match a given worker name',
+        description: 'Re-runs all jobs across one or more queues whose data.runOnly[] contains the specified worker name. Defaults to completed and failed jobs.',
+        tags: ['Queues'],
+        body: rerunJobsByWorkerBodySchema,
+        response: {
+          200: z.object({
+            totalMatched: z.number().describe('Total number of jobs that matched the criteria'),
+            perQueue: z.record(z.number()).describe('Number of matched jobs per queue name'),
+          })
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{
+        Body: {
+          workerName: string;
+          statuses?: JobType[];
+          queues?: string[];
+        }
+      }>,
+      reply
+    ) => {
+      const { workerName, statuses, queues } = request.body;
+
+      const queueService = await QueueService.getQueueService();
+
+      const resolvedQueues = queues && queues.length > 0
+        ? queues
+        : Object.values(QUEUE_NAMES);
+
+      const result = await queueService.rerunJobsByWorkerName(workerName, {
+        queueNames: resolvedQueues,
+        statuses,
+      });
+
+      return reply.send(result);
     }
   );
 }

@@ -217,6 +217,77 @@ export class QueueService {
         console.info('[QueueService] rerunJob: Completed', { queueName, jobId, finalState: finalJob.status });
         return finalJob;
     }
+
+    /**
+     * Re-run all jobs that match a given worker name (e.g. a value in data.runOnly[])
+     * across one or more queues.
+     *
+     * By default it will re-run jobs that are either completed or failed, since
+     * waiting/active jobs are already in progress.
+     */
+    public async rerunJobsByWorkerName(
+        workerName: string,
+        options?: {
+            queueNames?: string[];
+            statuses?: JobType[];
+        }
+    ): Promise<{ totalMatched: number; perQueue: Record<string, number> }> {
+        const queueNames = options?.queueNames && options.queueNames.length > 0
+            ? options.queueNames
+            : Object.values(QUEUE_NAMES);
+
+        const statuses = options?.statuses && options.statuses.length > 0
+            ? options.statuses
+            : (['completed', 'failed'] as JobType[]);
+
+        console.info('[QueueService] rerunJobsByWorkerName: Starting', {
+            workerName,
+            queueNames,
+            statuses
+        });
+
+        const perQueue: Record<string, number> = {};
+        let totalMatched = 0;
+
+        for (const queueName of queueNames) {
+            const queue = await this.getQueue(queueName);
+            const jobs = await queue.getJobs(statuses);
+
+            const matchingJobs = jobs.filter(job => {
+                const runOnly = job.data?.runOnly as string[] | undefined;
+                return Array.isArray(runOnly) && runOnly.includes(workerName);
+            });
+
+            console.info('[QueueService] rerunJobsByWorkerName: Queue scan result', {
+                queueName,
+                totalJobs: jobs.length,
+                matchingJobs: matchingJobs.length
+            });
+
+            for (const job of matchingJobs) {
+                try {
+                    await this.rerunJob(queueName, job.id!);
+                } catch (error) {
+                    console.error('[QueueService] rerunJobsByWorkerName: Failed to rerun job', {
+                        queueName,
+                        jobId: job.id,
+                        error
+                    });
+                }
+            }
+
+            perQueue[queueName] = matchingJobs.length;
+            totalMatched += matchingJobs.length;
+        }
+
+        console.info('[QueueService] rerunJobsByWorkerName: Completed', {
+            workerName,
+            totalMatched,
+            perQueue
+        });
+
+        return { totalMatched, perQueue };
+    }
 }
 
 export async function transformJobtoBaseJob(job: Job): Promise<BaseJob> {
