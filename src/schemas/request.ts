@@ -42,3 +42,9 @@ export const rerunJobsByWorkerBodySchema = z.object({
     statuses: z.array(jobStatusSchema).optional().describe('Optional list of job statuses to consider (defaults to completed and failed jobs)'),
     queues: z.array(z.string()).optional().describe('Optional list of queue names to restrict the rerun to (defaults to all known queues)'),
 });
+
+export const rerunAndSaveQueueJobBodySchema = z.object({
+    scopes: z.array(z.string())
+        .min(1)
+        .describe('Scopes to rerun, e.g. [\"scope1+2\"], [\"scope3\"], or [\"scope1+2\", \"scope3\"]'),
+});

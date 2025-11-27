@@ -5,7 +5,7 @@ import { AddJobBody, BaseJob } from "../schemas/types";
 import { error404ResponseSchema, queueAddJobResponseSchema, queueJobResponseSchema, queueResponseSchema, queueStatsResponseSchema } from "../schemas/response";
 import { STATUS, QUEUE_NAMES } from "../lib/bullmq";
 import { JobType } from "bullmq";
-import { addQueueJobBodySchema, readQueueJobPathParamsSchema, readQueuePathParamsSchema, readQueueQueryStringSchema, readQueueStatsQueryStringSchema, rerunJobsByWorkerBodySchema, rerunQueueJobBodySchema } from "../schemas/request";
+import { addQueueJobBodySchema, readQueueJobPathParamsSchema, readQueuePathParamsSchema, readQueueQueryStringSchema, readQueueStatsQueryStringSchema, rerunAndSaveQueueJobBodySchema, rerunJobsByWorkerBodySchema, rerunQueueJobBodySchema } from "../schemas/request";
 import { z } from "zod";
 
 export async function readQueuesRoute(app: FastifyInstance) {
@@ -214,6 +214,59 @@ export async function readQueuesRoute(app: FastifyInstance) {
         }
         app.log.error(error, 'Error re-running job');
         return reply.status(500).send({ error: 'Failed to re-run job' });
+      }
+    }
+  );
+
+  app.post(
+    '/:name/:id/rerun-and-save',
+    {
+      schema: {
+        summary: 'Re-run extract-emissions for this process and save results',
+        description:
+          'From a follow-up job (e.g. scope1+2 or scope3), find the original EXTRACT_EMISSIONS job and enqueue a new one with runOnly set to the requested scopes.',
+        tags: ['Queues'],
+        params: readQueueJobPathParamsSchema,
+        body: rerunAndSaveQueueJobBodySchema,
+        response: {
+          200: queueJobResponseSchema,
+          400: error404ResponseSchema,
+          404: error404ResponseSchema,
+        },
+      },
+    },
+    async (
+      request: FastifyRequest<{
+        Params: { name: string; id: string };
+        Body: { scopes: string[] };
+      }>,
+      reply
+    ) => {
+      const { name, id } = request.params;
+      const { scopes } = request.body;
+
+      const queueService = await QueueService.getQueueService();
+
+      try {
+        const newJob = await queueService.rerunExtractEmissionsFromFollowup(
+          name,
+          id,
+          scopes
+        );
+        return reply.send(newJob);
+      } catch (error: any) {
+        const msg = error?.message ?? '';
+
+        if (msg.includes('EXTRACT_EMISSIONS job') || msg.includes('threadId')) {
+          return reply.status(404).send({ error: msg });
+        }
+
+        if (msg.includes('Unknown queue')) {
+          return reply.status(400).send({ error: msg });
+        }
+
+        app.log.error(error, 'Error in rerun-and-save');
+        return reply.status(500).send({ error: 'Failed to rerun and save emissions' });
       }
     }
   );
