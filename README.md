@@ -2,6 +2,8 @@
 
 This repository contains an API to interact with the Garbo pipeline for processing reports. The current scope of the API is to provide endpoints for the validation to query jobs and processes and allow interaction between the Garbo pipeline and the user through validation requests.
 
+The latest run of each Company is shown in the company list.
+
 ## Terminology
 - **Queue**: A BullMQ queue that holds jobs to be processed. The pipeline consists of many independent queues.
 - **Job**: An item in a BullMQ queue. A job contains data (payload) and metadata for processing.
