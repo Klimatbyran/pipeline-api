@@ -35,4 +35,10 @@ export const addQueueJobBodySchema = z.object({
 
 export const rerunQueueJobBodySchema = z.object({
     data: z.record(z.any()).optional().describe('Optional job data overrides. Will merge with existing job data before re-running'),
+}); 
+
+export const rerunJobsByWorkerBodySchema = z.object({
+    workerName: z.string().describe('Name of the worker / pipeline step to re-run (e.g. "scope1+2")'),
+    statuses: z.array(jobStatusSchema).optional().describe('Optional list of job statuses to consider (defaults to completed and failed jobs)'),
+    queues: z.array(z.string()).optional().describe('Optional list of queue names to restrict the rerun to (defaults to all known queues)'),
 });
