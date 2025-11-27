@@ -219,6 +219,182 @@ export class QueueService {
     }
 
     /**
+     * From a follow-up job (e.g. scope1+2 or scope3), find the original
+     * EXTRACT_EMISSIONS job for the same process/thread and enqueue a new
+     * extract-emissions job with runOnly set to the requested scopes.
+     */
+    public async rerunExtractEmissionsFromFollowup(
+        followupQueueName: string,
+        followupJobId: string,
+        scopes: string[],
+    ): Promise<DataJob> {
+        console.info('[QueueService] rerunExtractEmissionsFromFollowup: Starting', {
+            followupQueueName,
+            followupJobId,
+            scopes,
+        });
+
+        const followupJob = await this.getFollowupJob(followupQueueName, followupJobId);
+        const threadId = this.getThreadIdFromJob(followupJob);
+
+        const extractEmissionsJob = await this.getLatestExtractEmissionsJobForThread(threadId);
+        const fiscalYear = await this.getLatestFiscalYearForThread(threadId);
+
+        const companyName = this.getCompanyNameFromJobs(
+            extractEmissionsJob,
+            followupJob,
+            threadId
+        );
+
+        const mergedData = this.buildExtractRerunData(
+            followupJob,
+            extractEmissionsJob,
+            fiscalYear,
+            scopes
+        );
+
+        const newJob = await this.enqueueExtractRerun(companyName, mergedData);
+
+        console.info('[QueueService] rerunExtractEmissionsFromFollowup: New job created', {
+            newJobId: newJob.id,
+            scopes,
+        });
+
+        return this.getJobData(QUEUE_NAMES.EXTRACT_EMISSIONS, newJob.id!);
+    }
+
+    private async getFollowupJob(
+        followupQueueName: string,
+        followupJobId: string
+    ): Promise<DataJob> {
+        return this.getJobData(followupQueueName, followupJobId);
+    }
+
+    private getThreadIdFromJob(job: DataJob): string {
+        const followupData: any = job.data ?? {};
+
+        const threadId =
+            followupData.threadId ??
+            job.threadId ??
+            job.processId;
+
+        if (!threadId) {
+            console.error('[QueueService] getThreadIdFromJob: Missing threadId', {
+                jobId: job.id,
+            });
+            throw new Error('Cannot locate process/thread for this job (no threadId).');
+        }
+
+        return threadId;
+    }
+
+    private async getLatestExtractEmissionsJobForThread(threadId: string): Promise<DataJob> {
+        const extractJobs = await this.getDataJobs(
+            [QUEUE_NAMES.EXTRACT_EMISSIONS],
+            undefined,
+            threadId
+        );
+
+        if (!extractJobs.length) {
+            console.error('[QueueService] getLatestExtractEmissionsJobForThread: No EXTRACT_EMISSIONS job found', {
+                threadId,
+            });
+            throw new Error('No EXTRACT_EMISSIONS job found for this process.');
+        }
+
+        return extractJobs.sort(
+            (firstJob, secondJob) => (secondJob.timestamp ?? 0) - (firstJob.timestamp ?? 0)
+        )[0];
+    }
+
+    private getCompanyNameFromJobs(
+        extractEmissionsJob: DataJob,
+        followupJob: DataJob,
+        threadId: string
+    ): string {
+        const extractData: any = extractEmissionsJob.data ?? {};
+        const followupData: any = followupJob.data ?? {};
+
+        return (
+            extractData.companyName ??
+            followupData.companyName ??
+            threadId
+        );
+    }
+
+    private buildExtractRerunData(
+        followupJob: DataJob,
+        extractEmissionsJob: DataJob,
+        fiscalYear: any | undefined,
+        scopes: string[],
+    ): any {
+        const extractData: any = extractEmissionsJob.data ?? {};
+        const followupData: any = followupJob.data ?? {};
+
+        return {
+            ...extractData,
+            ...(followupData.wikidata ? { wikidata: followupData.wikidata } : {}),
+            ...(fiscalYear ? { fiscalYear } : {}),
+            runOnly: scopes,
+        };
+    }
+
+    private async enqueueExtractRerun(
+        companyName: string,
+        jobData: any,
+    ): Promise<Job> {
+        const extractQueue = await this.getQueue(QUEUE_NAMES.EXTRACT_EMISSIONS);
+        return extractQueue.add('rerun emissions ' + companyName, jobData);
+    }
+
+    private async getLatestFiscalYearForThread(threadId: string): Promise<any | undefined> {
+        // For FOLLOW_UP_FISCAL_YEAR jobs, the fiscal year lives in the *return value* JSON, e.g.:
+        // { "value": { "fiscalYear": { startMonth, endMonth } }, ... }.
+        try {
+            const fiscalJobs = await this.getDataJobs(
+                [QUEUE_NAMES.FOLLOW_UP_FISCAL_YEAR],
+                undefined,
+                threadId
+            );
+
+            if (fiscalJobs.length === 0) {
+                return undefined;
+            }
+
+            const latestFiscal = fiscalJobs.sort(
+                (firstJob, secondJob) => (secondJob.timestamp ?? 0) - (firstJob.timestamp ?? 0)
+            )[0];
+
+            const returnValue = latestFiscal.returnvalue;
+            if (typeof returnValue === 'string') {
+                try {
+                    const parsed = JSON.parse(returnValue);
+                    return parsed.fiscalYear ?? parsed.value?.fiscalYear ?? undefined;
+                } catch (parseErr) {
+                    console.warn('[QueueService] getLatestFiscalYearForThread: Failed to parse fiscalYear returnvalue', {
+                        threadId,
+                        error: parseErr,
+                    });
+                    return undefined;
+                }
+            }
+
+            if (returnValue && typeof returnValue === 'object') {
+                const parsed: any = returnValue;
+                return parsed.fiscalYear ?? parsed.value?.fiscalYear ?? undefined;
+            }
+
+            return undefined;
+        } catch (err) {
+            console.warn('[QueueService] getLatestFiscalYearForThread: Failed to fetch FOLLOW_UP_FISCAL_YEAR jobs', {
+                threadId,
+                error: err,
+            });
+            return undefined;
+        }
+    }
+
+    /**
      * Re-run all jobs that match a given worker name (e.g. a value in data.runOnly[])
      * across one or more queues.
      *
