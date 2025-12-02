@@ -41,6 +41,7 @@ export const rerunJobsByWorkerBodySchema = z.object({
     workerName: z.string().describe('Name of the worker / pipeline step to re-run (e.g. "scope1+2")'),
     statuses: z.array(jobStatusSchema).optional().describe('Optional list of job statuses to consider (defaults to completed and failed jobs)'),
     queues: z.array(z.string()).optional().describe('Optional list of queue names to restrict the rerun to (defaults to all known queues)'),
+    limit: z.union([z.number(), z.literal('all')]).optional().default(5).describe('Maximum number of companies to rerun (defaults to 5). Use "all" to rerun all companies.'),
 });
 
 export const rerunAndSaveQueueJobBodySchema = z.object({
