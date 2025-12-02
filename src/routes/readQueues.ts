@@ -275,8 +275,8 @@ export async function readQueuesRoute(app: FastifyInstance) {
     '/rerun-by-worker',
     {
       schema: {
-        summary: 'Re-run all jobs that match a given worker name',
-        description: 'Re-runs all jobs across one or more queues whose data.runOnly[] contains the specified worker name. Defaults to completed and failed jobs.',
+        summary: 'Re-run all jobs that match a given worker name (using rerun-and-save)',
+        description: 'Re-runs all jobs across one or more queues whose data.runOnly[] contains the specified worker name using the rerun-and-save approach (finds original EXTRACT_EMISSIONS job and creates new one with specified scopes). Defaults to completed and failed jobs.',
         tags: ['Queues'],
         body: rerunJobsByWorkerBodySchema,
         response: {
@@ -293,11 +293,12 @@ export async function readQueuesRoute(app: FastifyInstance) {
           workerName: string;
           statuses?: JobType[];
           queues?: string[];
+          limit?: number | 'all';
         }
       }>,
       reply
     ) => {
-      const { workerName, statuses, queues } = request.body;
+      const { workerName, statuses, queues, limit } = request.body;
 
       const queueService = await QueueService.getQueueService();
 
@@ -308,6 +309,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
       const result = await queueService.rerunJobsByWorkerName(workerName, {
         queueNames: resolvedQueues,
         statuses,
+        limit,
       });
 
       return reply.send(result);

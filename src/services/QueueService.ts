@@ -400,12 +400,16 @@ export class QueueService {
      *
      * By default it will re-run jobs that are either completed or failed, since
      * waiting/active jobs are already in progress.
+     * 
+     * Limits to specified number of companies (default 5) and only reruns the latest threadId per company.
+     * Use limit: 'all' to rerun all companies.
      */
     public async rerunJobsByWorkerName(
         workerName: string,
         options?: {
             queueNames?: string[];
             statuses?: JobType[];
+            limit?: number | 'all';
         }
     ): Promise<{ totalMatched: number; perQueue: Record<string, number> }> {
         const queueNames = options?.queueNames && options.queueNames.length > 0
@@ -416,12 +420,50 @@ export class QueueService {
             ? options.statuses
             : (['completed', 'failed'] as JobType[]);
 
-        console.info('[QueueService] rerunJobsByWorkerName: Starting', {
+        const limit = options?.limit ?? 5;
+
+        console.info('[QueueService] rerunJobsByWorkerName: Starting (using rerun-and-save)', {
+            workerName,
+            queueNames,
+            statuses,
+            limit
+        });
+
+        const { allMatchingJobInfos, perQueue, totalMatched } = await this.collectMatchingJobsByWorker(
             workerName,
             queueNames,
             statuses
+        );
+
+        const jobsToRerun = this.selectLatestThreadIdPerCompany(allMatchingJobInfos);
+        const limitedJobsToRerun = limit === 'all' 
+            ? jobsToRerun 
+            : this.limitToMostRecent(jobsToRerun, limit);
+
+        await this.rerunSelectedJobs(limitedJobsToRerun, workerName);
+
+        console.info('[QueueService] rerunJobsByWorkerName: Completed (using rerun-and-save)', {
+            workerName,
+            totalMatched,
+            uniqueCompanies: jobsToRerun.length,
+            jobsRerun: limitedJobsToRerun.length,
+            limit,
+            perQueue
         });
 
+        return { totalMatched, perQueue };
+    }
+
+    private async collectMatchingJobsByWorker(
+        workerName: string,
+        queueNames: string[],
+        statuses: JobType[]
+    ): Promise<{
+        allMatchingJobInfos: Array<{ job: Job; queueName: string; companyName: string; threadId: string; timestamp: number }>;
+        perQueue: Record<string, number>;
+        totalMatched: number;
+    }> {
+        const allMatchingJobInfos: Array<{ job: Job; queueName: string; companyName: string; threadId: string; timestamp: number }> = [];
         const perQueue: Record<string, number> = {};
         let totalMatched = 0;
 
@@ -441,28 +483,85 @@ export class QueueService {
             });
 
             for (const job of matchingJobs) {
-                try {
-                    await this.rerunJob(queueName, job.id!);
-                } catch (error) {
-                    console.error('[QueueService] rerunJobsByWorkerName: Failed to rerun job', {
-                        queueName,
-                        jobId: job.id,
-                        error
-                    });
-                }
+                const jobInfo = this.extractJobInfo(job, queueName);
+                allMatchingJobInfos.push(jobInfo);
             }
 
             perQueue[queueName] = matchingJobs.length;
             totalMatched += matchingJobs.length;
         }
 
-        console.info('[QueueService] rerunJobsByWorkerName: Completed', {
-            workerName,
-            totalMatched,
-            perQueue
+        return { allMatchingJobInfos, perQueue, totalMatched };
+    }
+
+    private extractJobInfo(
+        job: Job,
+        queueName: string
+    ): { job: Job; queueName: string; companyName: string; threadId: string; timestamp: number } {
+        const jobData: any = job.data ?? {};
+        const companyName = jobData.companyName ?? jobData.threadId ?? 'unknown';
+        const threadId = jobData.threadId ?? job.id ?? 'unknown';
+        const timestamp = job.timestamp ?? 0;
+
+        return {
+            job,
+            queueName,
+            companyName,
+            threadId,
+            timestamp
+        };
+    }
+
+    private selectLatestThreadIdPerCompany(
+        jobInfos: Array<{ job: Job; queueName: string; companyName: string; threadId: string; timestamp: number }>
+    ): Array<{ job: Job; queueName: string; companyName: string; threadId: string; timestamp: number }> {
+        const jobsByCompany = new Map<string, typeof jobInfos[0]>();
+
+        for (const jobInfo of jobInfos) {
+            const existing = jobsByCompany.get(jobInfo.companyName);
+            if (!existing || jobInfo.timestamp > existing.timestamp) {
+                jobsByCompany.set(jobInfo.companyName, jobInfo);
+            }
+        }
+
+        return Array.from(jobsByCompany.values());
+    }
+
+    private limitToMostRecent(
+        jobInfos: Array<{ job: Job; queueName: string; companyName: string; threadId: string; timestamp: number }>,
+        limit: number
+    ): Array<{ job: Job; queueName: string; companyName: string; threadId: string; timestamp: number }> {
+        return jobInfos
+            .sort((firstJob, secondJob) => secondJob.timestamp - firstJob.timestamp)
+            .slice(0, limit);
+    }
+
+    private async rerunSelectedJobs(
+        jobInfos: Array<{ job: Job; queueName: string; companyName: string; threadId: string; timestamp: number }>,
+        workerName: string
+    ): Promise<void> {
+        console.info('[QueueService] rerunJobsByWorkerName: Deduplicated and limited', {
+            jobsToRerun: jobInfos.length
         });
 
-        return { totalMatched, perQueue };
+        for (const jobInfo of jobInfos) {
+            try {
+                await this.rerunExtractEmissionsFromFollowup(
+                    jobInfo.queueName,
+                    jobInfo.job.id!,
+                    [workerName]
+                );
+            } catch (error) {
+                console.error('[QueueService] rerunJobsByWorkerName: Failed to rerun and save job', {
+                    queueName: jobInfo.queueName,
+                    jobId: jobInfo.job.id,
+                    companyName: jobInfo.companyName,
+                    threadId: jobInfo.threadId,
+                    workerName,
+                    error
+                });
+            }
+        }
     }
 }
 
