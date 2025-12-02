@@ -227,6 +227,10 @@ export class QueueService {
         followupQueueName: string,
         followupJobId: string,
         scopes: string[],
+        cache?: {
+            extractEmissionsByThreadId?: Map<string, DataJob>;
+            fiscalYearByThreadId?: Map<string, any | undefined>;
+        }
     ): Promise<DataJob> {
         console.info('[QueueService] rerunExtractEmissionsFromFollowup: Starting', {
             followupQueueName,
@@ -237,8 +241,13 @@ export class QueueService {
         const followupJob = await this.getFollowupJob(followupQueueName, followupJobId);
         const threadId = this.getThreadIdFromJob(followupJob);
 
-        const extractEmissionsJob = await this.getLatestExtractEmissionsJobForThread(threadId);
-        const fiscalYear = await this.getLatestFiscalYearForThread(threadId);
+        const extractEmissionsJob =
+            cache?.extractEmissionsByThreadId?.get(threadId) ??
+            await this.getLatestExtractEmissionsJobForThread(threadId);
+
+        const fiscalYear =
+            cache?.fiscalYearByThreadId?.get(threadId) ??
+            await this.getLatestFiscalYearForThread(threadId);
 
         const companyName = this.getCompanyNameFromJobs(
             extractEmissionsJob,
@@ -394,6 +403,109 @@ export class QueueService {
         }
     }
 
+    private async buildExtractEmissionsJobCache(
+        threadIds: string[]
+    ): Promise<Map<string, DataJob>> {
+        const uniqueThreadIds = new Set(threadIds);
+        const extractJobs = await this.getDataJobs(
+            [QUEUE_NAMES.EXTRACT_EMISSIONS]
+        );
+
+        const extractEmissionsByThreadId = new Map<string, DataJob>();
+
+        for (const extractJob of extractJobs) {
+            const extractData: any = extractJob.data ?? {};
+            const extractThreadId: string | undefined =
+                extractData.threadId ??
+                extractJob.threadId ??
+                extractJob.processId;
+
+            if (!extractThreadId || !uniqueThreadIds.has(extractThreadId)) {
+                continue;
+            }
+
+            const existingJobForThread = extractEmissionsByThreadId.get(extractThreadId);
+            const existingTimestamp = existingJobForThread?.timestamp ?? 0;
+            const candidateTimestamp = extractJob.timestamp ?? 0;
+
+            if (!existingJobForThread || candidateTimestamp > existingTimestamp) {
+                extractEmissionsByThreadId.set(extractThreadId, extractJob);
+            }
+        }
+
+        return extractEmissionsByThreadId;
+    }
+
+    private extractFiscalYearFromReturnValue(returnValue: any): any | undefined {
+        if (typeof returnValue === 'string') {
+            try {
+                const parsed = JSON.parse(returnValue);
+                return parsed.fiscalYear ?? parsed.value?.fiscalYear ?? undefined;
+            } catch (parseErr) {
+                console.warn('[QueueService] extractFiscalYearFromReturnValue: Failed to parse fiscalYear returnvalue', {
+                    error: parseErr,
+                });
+                return undefined;
+            }
+        }
+
+        if (returnValue && typeof returnValue === 'object') {
+            const parsed: any = returnValue;
+            return parsed.fiscalYear ?? parsed.value?.fiscalYear ?? undefined;
+        }
+
+        return undefined;
+    }
+
+    private async buildFiscalYearCache(
+        threadIds: string[]
+      ): Promise<Map<string, any | undefined>> {
+        const targetThreadIds = new Set(threadIds);
+      
+        try {
+          const fiscalJobs = await this.getDataJobs([QUEUE_NAMES.FOLLOW_UP_FISCAL_YEAR]);
+          const fiscalYearByThreadId = new Map<string, any | undefined>();
+      
+          for (const fiscalJob of fiscalJobs) {
+            this.addFiscalYearForJobToCache(fiscalJob, targetThreadIds, fiscalYearByThreadId);
+          }
+      
+          return fiscalYearByThreadId;
+        } catch (error) {
+          console.warn('[QueueService] buildFiscalYearCache: Failed to build fiscal year cache', {
+            error,
+          });
+          return new Map<string, any | undefined>();
+        }
+      }
+
+    private addFiscalYearForJobToCache(
+    fiscalJob: DataJob,
+    targetThreadIds: Set<string>,
+    fiscalYearByThreadId: Map<string, any | undefined>
+    ): void {
+    const fiscalThreadId = this.getThreadIdFromFiscalJob(fiscalJob);
+    if (!fiscalThreadId || !targetThreadIds.has(fiscalThreadId)) {
+        return;
+    }
+    
+    const fiscalYear = this.extractFiscalYearFromReturnValue(fiscalJob.returnvalue);
+    
+    // Keep the first fiscalYear we see per threadId (matches “latest only” intent
+    // because we only care about the final cache value used for reruns)
+    if (!fiscalYearByThreadId.has(fiscalThreadId)) {
+        fiscalYearByThreadId.set(fiscalThreadId, fiscalYear);
+    }
+    }
+    
+    private getThreadIdFromFiscalJob(fiscalJob: DataJob): string | undefined {
+    const fiscalData: any = fiscalJob.data ?? {};
+    return (
+        fiscalData.threadId ??
+        fiscalJob.threadId ??
+        fiscalJob.processId
+    );
+    }
     /**
      * Re-run all jobs that match a given worker name (e.g. a value in data.runOnly[])
      * across one or more queues.
@@ -440,7 +552,17 @@ export class QueueService {
             ? jobsToRerun 
             : this.limitToMostRecent(jobsToRerun, limit);
 
-        await this.rerunSelectedJobs(limitedJobsToRerun, workerName);
+        const threadIdsToRerun = limitedJobsToRerun.map(jobInfo => jobInfo.threadId);
+
+        const extractEmissionsByThreadId = await this.buildExtractEmissionsJobCache(threadIdsToRerun);
+        const fiscalYearByThreadId = await this.buildFiscalYearCache(threadIdsToRerun);
+
+        const rerunCache = {
+            extractEmissionsByThreadId,
+            fiscalYearByThreadId,
+        };
+
+        await this.rerunSelectedJobs(limitedJobsToRerun, workerName, rerunCache);
 
         console.info('[QueueService] rerunJobsByWorkerName: Completed (using rerun-and-save)', {
             workerName,
@@ -471,10 +593,8 @@ export class QueueService {
             const queue = await this.getQueue(queueName);
             const jobs = await queue.getJobs(statuses);
 
-            const matchingJobs = jobs.filter(job => {
-                const runOnly = job.data?.runOnly as string[] | undefined;
-                return Array.isArray(runOnly) && runOnly.includes(workerName);
-            });
+            // We trust the queue name + statuses; if a job is here, it's relevant
+            const matchingJobs = jobs;
 
             console.info('[QueueService] rerunJobsByWorkerName: Queue scan result', {
                 queueName,
@@ -538,7 +658,11 @@ export class QueueService {
 
     private async rerunSelectedJobs(
         jobInfos: Array<{ job: Job; queueName: string; companyName: string; threadId: string; timestamp: number }>,
-        workerName: string
+        workerName: string,
+        cache: {
+            extractEmissionsByThreadId: Map<string, DataJob>;
+            fiscalYearByThreadId: Map<string, any | undefined>;
+        }
     ): Promise<void> {
         console.info('[QueueService] rerunJobsByWorkerName: Deduplicated and limited', {
             jobsToRerun: jobInfos.length
@@ -549,7 +673,8 @@ export class QueueService {
                 await this.rerunExtractEmissionsFromFollowup(
                     jobInfo.queueName,
                     jobInfo.job.id!,
-                    [workerName]
+                    [workerName],
+                    cache
                 );
             } catch (error) {
                 console.error('[QueueService] rerunJobsByWorkerName: Failed to rerun and save job', {
