@@ -1,5 +1,5 @@
 import { QUEUE_NAMES } from "../lib/bullmq";
-import { CompanyProcess, DataJob, Process, ProcessStatus } from "../schemas/types";
+import { BaseJob, CompanyProcess, DataJob, Process, ProcessStatus } from "../schemas/types";
 import { QueueService } from "./QueueService";
 
 export class ProcessService {
@@ -105,20 +105,18 @@ export class ProcessService {
                 return Math.max(completionTime, job.finishedOn);
             }
         }, 0);
-        
-        jobs.map(job => {
-            const {data, ...rest} = job;
-            return {
-                ...rest
-            };
-        })
+
+        const baseJobs: BaseJob[] = jobs.map(job => {
+            const { data, returnvalue, ...rest } = job;
+            return rest;
+        });
 
         // If no threadId, create a process id based on company name to keep them separate
         const processId = id ?? (company ? `unknown-${company}` : "unknown");
         
         const process: Process = {
             id: processId,
-            jobs,
+            jobs: baseJobs,
             wikidataId,
             company,
             year,
