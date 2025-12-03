@@ -3,8 +3,8 @@
   "version": "0.0.2-rc.12",
   "scripts": {
     "build": "tsc",
-    "start": "node --import tsx src/index.ts",
-    "dev": "node --import tsx --watch src/index.ts"
+    "start": "node --max-old-space-size=4096 --import tsx src/index.ts",
+    "dev": "node --max-old-space-size=4096 --import tsx --watch src/index.ts"
   },
   "author": "Christian Landgren, Moritz Zingg et al.",
   "license": "ISC",
