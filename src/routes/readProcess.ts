@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
 import { QueueService } from "../services/QueueService";
 import { processesGroupedByCompanyResponseSchema, processesResponseSchema, processResponseSchema } from "../schemas/response";
-import { readProcessPathParamsSchema } from "../schemas/request";
+import { readProcessPathParamsSchema, readProcessesByCompanyQueryStringSchema } from "../schemas/request";
 import { ProcessService } from "../services/ProcessService";
 
 export async function readProcessRoute(app: FastifyInstance) {
@@ -34,17 +34,26 @@ export async function readProcessRoute(app: FastifyInstance) {
         summary: 'Get processes by companies',
         description: '',
         tags: ['Process'],
+        querystring: readProcessesByCompanyQueryStringSchema,
         response: {
           200: processesGroupedByCompanyResponseSchema
         },
       },
     },
     async (
-      _request,
+      request: FastifyRequest<{
+        Querystring: { page?: number; pageSize?: number };
+      }>,
       reply
     ) => {
+      const requestedPage = request.query.page ?? 1;
+      const requestedPageSize = request.query.pageSize ?? 100;
+
       const processService = await ProcessService.getProcessService();
-      const companyProcesses = await processService.getProcessesGroupedByCompany(); 
+      const companyProcesses = await processService.getPagedCompanyProcesses(
+        requestedPage,
+        requestedPageSize,
+      ); 
       return reply.send(companyProcesses)
     }
   ); 

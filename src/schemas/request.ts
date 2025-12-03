@@ -22,6 +22,11 @@ export const readQueueJobPathParamsSchema = z.object({
     id: z.string()
 });
 
+export const readProcessesByCompanyQueryStringSchema = z.object({
+    page: z.coerce.number().int().min(1).optional(),
+    pageSize: z.coerce.number().int().min(1).max(500).optional(),
+});
+
 // Accept both camelCase and kebab-case for the reindex flag.
 // Normalization to camelCase is done in the route handler to avoid schema transforms
 // that can accidentally mark fields as required in JSON schema.

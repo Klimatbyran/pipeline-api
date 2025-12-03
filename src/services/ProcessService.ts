@@ -76,6 +76,12 @@ export class ProcessService {
             return grouped;
         }
 
+    public async getPagedCompanyProcesses(page: number, pageSize: number): Promise<CompanyProcess[]> {
+        const allCompanyProcesses = await this.getProcessesGroupedByCompany();
+        const sortedCompanyProcesses = this.sortCompanyProcessesByName(allCompanyProcesses);
+        return this.getCompanyProcessesPage(sortedCompanyProcesses, page, pageSize);
+    }
+
     private createProcess(jobs: DataJob[]): Process {
         let id: string | undefined;
         let wikidataId: string | undefined;	
@@ -138,5 +144,21 @@ export class ProcessService {
             return 'completed';
         }
         return 'active';
+    }
+
+    private sortCompanyProcessesByName(companyProcesses: CompanyProcess[]): CompanyProcess[] {
+        return [...companyProcesses].sort((firstCompany, secondCompany) => {
+            const firstName = firstCompany.company ?? '';
+            const secondName = secondCompany.company ?? '';
+            return firstName.localeCompare(secondName, 'en', { sensitivity: 'base' });
+        });
+    }
+
+    private getCompanyProcessesPage(companyProcesses: CompanyProcess[], page: number, pageSize: number): CompanyProcess[] {
+        const safePage = page > 0 ? page : 1;
+        const safePageSize = pageSize > 0 ? pageSize : 100;
+        const startIndex = (safePage - 1) * safePageSize;
+        const endIndex = startIndex + safePageSize;
+        return companyProcesses.slice(startIndex, endIndex);
     }
 }
