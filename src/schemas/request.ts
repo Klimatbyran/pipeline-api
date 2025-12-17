@@ -52,5 +52,5 @@ export const rerunJobsByWorkerBodySchema = z.object({
 export const rerunAndSaveQueueJobBodySchema = z.object({
     scopes: z.array(z.string())
         .min(1)
-        .describe('Scopes to rerun, e.g. [\"scope1+2\"], [\"scope3\"], or [\"scope1+2\", \"scope3\"]'),
+        .describe('Scopes to rerun, e.g. [\"scope1\"], [\"scope2\"], [\"scope1+2\"], [\"scope3\"], or [\"scope1\", \"scope2\", \"scope3\"]'),
 });
