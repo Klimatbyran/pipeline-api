@@ -224,7 +224,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
       schema: {
         summary: 'Re-run extract-emissions for this process and save results',
         description:
-          'From a follow-up job (e.g. scope1+2 or scope3), find the original EXTRACT_EMISSIONS job and enqueue a new one with runOnly set to the requested scopes.',
+          'From a follow-up job (e.g. scope1, scope2, scope1+2, or scope3), find the original EXTRACT_EMISSIONS job and enqueue a new one with runOnly set to the requested scopes. This overwrites any existing runOnly value.',
         tags: ['Queues'],
         params: readQueueJobPathParamsSchema,
         body: rerunAndSaveQueueJobBodySchema,

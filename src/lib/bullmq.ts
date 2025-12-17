@@ -12,7 +12,11 @@ export const QUEUE_NAMES = {
   INDEX_MARKDOWN: 'indexMarkdown',
   PRECHECK: 'precheck',
   GUESS_WIKIDATA: 'guessWikidata',
+  // Legacy combined scope queue (kept for backwards compatibility)
   FOLLOW_UP_SCOPE_12: 'followUpScope12',
+  // New split scope queues
+  FOLLOW_UP_SCOPE_1: 'followUpScope1',
+  FOLLOW_UP_SCOPE_2: 'followUpScope2',
   FOLLOW_UP_SCOPE_3: 'followUpScope3',
   FOLLOW_UP_BIOGENIC: 'followUpBiogenic',
   FOLLOW_UP_ECONOMY: 'followUpEconomy',
