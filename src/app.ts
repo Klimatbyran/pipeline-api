@@ -10,6 +10,7 @@ import { jsonSchemaTransform, serializerCompiler, validatorCompiler, ZodTypeProv
 import { z } from 'zod'
 import { readProcessRoute } from './routes/readProcess'
 import { readPipelineRoute } from './routes/readPipeline'
+import { validateJWT } from './middleware/auth'
 
 async function startApp() {
   const app = Fastify({logger: true})
@@ -40,6 +41,44 @@ async function startApp() {
     },
     transform: jsonSchemaTransform,
   })
+
+  // Apply JWT authentication to write operations only (POST, PUT, PATCH, DELETE)
+  // Read operations (GET) are unprotected - frontend handles auth for UX
+  // Public endpoints: /api/health, /api/export/openapi.json, /api (Scalar UI)
+  app.addHook('onRequest', async (request, reply) => {
+    const url = request.url;
+    const method = request.method;
+    
+    // Public endpoints that never require authentication
+    const publicPaths = [
+      '/api/health',
+      '/api/export/openapi.json',
+    ];
+    
+    // Write methods that require authentication
+    const writeMethods = ['POST', 'PUT', 'PATCH', 'DELETE'];
+    const isWriteOperation = writeMethods.includes(method);
+    
+    // Protected route patterns (queues, processes, pipeline)
+    const protectedRoutePatterns = [
+      '/api/queues',
+      '/api/processes',
+      '/api/pipeline',
+    ];
+    
+    // Check if this is a public endpoint
+    const isPublicPath = publicPaths.some(path => url === path || url.startsWith(path + '/'));
+    
+    // Check if this is a protected route
+    const isProtectedRoute = protectedRoutePatterns.some(pattern => 
+      url.startsWith(pattern + '/') || url === pattern
+    );
+    
+    // Apply JWT validation only to write operations on protected routes
+    if (isWriteOperation && isProtectedRoute && !isPublicPath) {
+      await validateJWT(request, reply);
+    }
+  });
 
   app.route({
     url: "/api/health",
