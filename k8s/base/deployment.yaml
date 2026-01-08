@@ -33,6 +33,11 @@ spec:
                 secretKeyRef:
                   name: env
                   key: API_SECRET
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: env
+                  key: JWT_SECRET
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
