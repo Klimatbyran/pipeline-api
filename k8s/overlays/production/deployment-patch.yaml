@@ -1,0 +1,12 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipeline-api
+spec:
+  template:
+    spec:
+      containers:
+        - name: pipeline-api
+          env:
+            - name: REDIS_HOST
+              value: redis-master.garbo.svc.cluster.local

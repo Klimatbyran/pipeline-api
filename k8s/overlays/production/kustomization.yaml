@@ -4,7 +4,8 @@ namespace: garbo
 resources:
   - ../../base
 patches:
-  - path: ingress.yaml
+  - path: ingress-patch.yaml
+  - path: deployment-patch.yaml
 images:
   - name: ghcr.io/klimatbyran/pipeline-api
-    newTag: '0.0.1' # {"$imagepolicy": "flux-system:pipeline-api:tag"}
+    newTag: "0.0.1" # {"$imagepolicy": "flux-system:pipeline-api:tag"}
