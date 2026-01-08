@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pipeline-api-ingress
+  namespace: garbo-stage
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  tls:
+  - hosts:
+    - validate.klimatkollen.se
+    secretName: frontend-tls
+  rules:
+  - host: validate.klimatkollen.se
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: pipeline-api
+            port:
+              number: 80
+

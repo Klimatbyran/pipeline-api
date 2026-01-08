@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipeline-api
+  namespace: garbo-stage
+  labels:
+    app: pipeline-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pipeline-api
+  template:
+    metadata:
+      labels:
+        app: pipeline-api
+    spec:
+      containers:
+        - name: pipeline-api
+          image: ${REPOSITORY_NAME}:${TAG}
+          ports:
+            - containerPort: 3001
+          envFrom:
+            - secretRef:
+                name: pipeline-api-env
+          resources:
+            limits:
+              cpu: "0.5"
+              memory: "512Mi"
+            requests:
+              cpu: "0.2"
+              memory: "256Mi"
+
