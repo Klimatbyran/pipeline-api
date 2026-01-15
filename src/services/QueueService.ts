@@ -82,13 +82,13 @@ export class QueueService {
             hasProcessId: !!processId 
         });
         
-        // Parallelize queue fetching (Option 6) with error handling
+        // Parallelize queue fetching with error handling
         const queuePromises = queueNames.map(async (queueName) => {
             try {
                 const queue = await this.getQueue(queueName);
                 const queueJobs: BaseJob[] = [];
                 
-                // Query each status separately to avoid individual getState() calls (Option 5)
+                // Query each status separately to avoid individual getState() calls
                 for(const statusToQuery of queryStatuses) {
                     try {
                         const rawJobs = await queue.getJobs([statusToQuery] as JobType[]);
@@ -162,7 +162,7 @@ export class QueueService {
             hasProcessId: !!processId 
         });
         
-        // Parallelize queue fetching (Option 6) with error handling
+        // Parallelize queue fetching with error handling
         const queuePromises = queueNames.map(async (queueName) => {
             try {
                 const queue = await this.getQueue(queueName);
