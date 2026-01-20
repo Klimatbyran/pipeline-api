@@ -89,6 +89,9 @@ export class QueueService {
                 const queueJobs: BaseJob[] = [];
                 
                 // Query each status separately to avoid individual getState() calls
+                // Trade-off: 8 queries instead of 1, but eliminates 1000+ getState() calls
+                // When we query getJobs([status]), we know all returned jobs have that status
+                // This avoids calling job.getState() for each job (which is a separate Redis query)
                 for(const statusToQuery of queryStatuses) {
                     try {
                         const rawJobs = await queue.getJobs([statusToQuery] as JobType[]);
@@ -168,7 +171,10 @@ export class QueueService {
                 const queue = await this.getQueue(queueName);
                 const queueJobs: DataJob[] = [];
                 
-                // Query each status separately to avoid individual getState() calls (Option 5)
+                // Query each status separately to avoid individual getState() calls
+                // Trade-off: 8 queries instead of 1, but eliminates 1000+ getState() calls
+                // When we query getJobs([status]), we know all returned jobs have that status
+                // This avoids calling job.getState() for each job (which is a separate Redis query)
                 for(const statusToQuery of queryStatuses) {
                     try {
                         const rawJobs = await queue.getJobs([statusToQuery] as JobType[]);
