@@ -7,7 +7,7 @@ const envSchema = z.object({
   API_BASE_URL: z.string().default('http://localhost:3001'),
   PORT: z.coerce.number().default(3001),
   NODE_ENV: z.enum(['development', 'staging', 'production']).default('production'),
-  JWT_SECRET: z.string().optional().describe('Required only for write operations (POST, PUT, PATCH, DELETE). GET requests work without it.'),
+  JWT_SECRET: z.string().min(1, 'JWT_SECRET is required for authentication'),
 })
 
 const env = envSchema.parse(process.env);
@@ -35,7 +35,7 @@ const apiConfig = {
 
   baseURL: env.API_BASE_URL,
   port: env.PORT,
-  jwtSecret: env.JWT_SECRET, // Optional - only needed for write operations
+  jwtSecret: env.JWT_SECRET,
 }
 
 export default apiConfig
