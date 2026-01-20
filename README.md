@@ -34,12 +34,12 @@ The following environment variables are available:
 **Required:**
 - `REDIS_HOST`: Redis host (default: `localhost`)
 - `REDIS_PORT`: Redis port (default: `6379`)
+- `NODE_ENV`: Environment (`development`, `staging`, or `production`, default: `production`)
+- `PORT`: API port (default: `3001`)
 
 **Optional:**
 - `JWT_SECRET`: Secret key for JWT token validation. Must match the secret used by the main auth API (`api.klimatkollen.se`). **Only required for write operations (POST, PUT, PATCH, DELETE). GET requests work without it.**
 - `REDIS_PASSWORD`: Redis password (optional)
-- `PORT`: API port (default: `3001`)
-- `NODE_ENV`: Environment (`development`, `staging`, or `production`, default: `production`)
 - `API_BASE_URL`: Base URL for the API (default: `http://localhost:3001`)
 
 Create a `.env` file in the root directory with these variables.
