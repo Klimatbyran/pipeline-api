@@ -32,6 +32,13 @@ export async function validateJWT(
 
   try {
     // Verify token signature and expiration
+    if (!apiConfig.jwtSecret) {
+      reply.status(500).send({
+        error: "JWT authentication not configured",
+        message: "JWT_SECRET environment variable is required for write operations.",
+      });
+      return;
+    }
     const decoded = jwt.verify(token, apiConfig.jwtSecret);
 
     // Attach user info to request for potential use in route handlers

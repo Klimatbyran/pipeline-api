@@ -70,54 +70,174 @@ export class QueueService {
     }
 
     public async getJobs(queueNames?: string[], status?: string, processId?: string): Promise<BaseJob[]> {
+        const startTime = Date.now();
         if(!queueNames  || queueNames.length === 0) {
             queueNames = Object.values(QUEUE_NAMES);
         }
-        const queryStatus = status ? [status] : JOB_STATUS;
-        const jobs: BaseJob[] = [];
-        for(const queueName of queueNames) {
-             const queue = await this.getQueue(queueName);
-            const rawJobs = await queue.getJobs(queryStatus as JobType[]);
-            const filteredRawJobs = processId
-                ? rawJobs.filter(job => {
-                    const pid = job.data?.threadId;
-                    return pid === processId;
-                })
-                : rawJobs;
-            const transformedJobs = await Promise.all(
-                filteredRawJobs.map(job => transformJobtoBaseJob(job))
-            );
-            jobs.push(...transformedJobs);
-        }
-        return jobs;
+        const queryStatuses = status ? [status] : JOB_STATUS;
+        
+        console.info('[QueueService] getJobs: Starting', { 
+            queueCount: queueNames.length, 
+            statusCount: queryStatuses.length,
+            hasProcessId: !!processId 
+        });
+        
+        // Parallelize queue fetching with error handling
+        const queuePromises = queueNames.map(async (queueName) => {
+            try {
+                const queue = await this.getQueue(queueName);
+                const queueJobs: BaseJob[] = [];
+                
+                // Query each status separately to avoid individual getState() calls
+                // Trade-off: 8 queries instead of 1, but eliminates 1000+ getState() calls
+                // When we query getJobs([status]), we know all returned jobs have that status
+                // This avoids calling job.getState() for each job (which is a separate Redis query)
+                for(const statusToQuery of queryStatuses) {
+                    try {
+                        const rawJobs = await queue.getJobs([statusToQuery] as JobType[]);
+                        
+                        const filteredRawJobs = processId
+                            ? rawJobs.filter(job => {
+                                const pid = job.data?.threadId;
+                                return pid === processId;
+                            })
+                            : rawJobs;
+                        
+                        // Transform with known state - no getState() call needed!
+                        const transformedJobs = await Promise.all(
+                            filteredRawJobs.map(job => transformJobtoBaseJob(job, statusToQuery))
+                        );
+                        
+                        queueJobs.push(...transformedJobs);
+                    } catch (statusError) {
+                        // Log error for this status but continue with other statuses
+                        console.error(`[QueueService] Error querying status '${statusToQuery}' for queue '${queueName}':`, statusError);
+                        // Continue processing other statuses
+                    }
+                }
+                
+                return queueJobs;
+            } catch (queueError) {
+                // Log error for this queue but continue with other queues
+                console.error(`[QueueService] Error processing queue '${queueName}':`, queueError);
+                // Return empty array so Promise.all doesn't fail completely
+                return [];
+            }
+        });
+        
+        // Wait for all queues to complete in parallel
+        // Using Promise.allSettled to handle partial failures gracefully
+        const results = await Promise.allSettled(queuePromises);
+        
+        // Extract successful results, log failures
+        const successfulResults: BaseJob[][] = [];
+        results.forEach((result, index) => {
+            if (result.status === 'fulfilled') {
+                successfulResults.push(result.value);
+            } else {
+                console.error(`[QueueService] Queue promise rejected for queue '${queueNames![index]}':`, result.reason);
+            }
+        });
+        
+        // Flatten array of arrays into single array
+        const allJobs = successfulResults.flat();
+        const duration = Date.now() - startTime;
+        console.info('[QueueService] getJobs: Completed', { 
+            jobCount: allJobs.length,
+            durationMs: duration,
+            queuesProcessed: successfulResults.length,
+            queuesTotal: queueNames.length
+        });
+        
+        return allJobs;
     }
 
     public async getDataJobs(queueNames?: string[], status?: string, processId?: string): Promise<DataJob[]> {
+        const startTime = Date.now();
         if(!queueNames  || queueNames.length === 0) {
             queueNames = Object.values(QUEUE_NAMES);
         }
-        const queryStatus = status ? [status] : JOB_STATUS;
-        const jobs: BaseJob[] = [];
-        for(const queueName of queueNames) {
-             const queue = await this.getQueue(queueName);
-            const rawJobs = await queue.getJobs(queryStatus as JobType[]);
-            const filteredRawJobs = processId
-                ? rawJobs.filter(job => {
-                    const pid = job.data?.threadId;
-                    return pid === processId;
-                })
-                : rawJobs;
-            const transformedJobs = await Promise.all(
-                filteredRawJobs.map(async job => {
-                    const dataJob: DataJob = await transformJobtoBaseJob(job);                    
-                    dataJob.data = job.data;        
-                    dataJob.returnvalue = job.returnvalue;
-                    return dataJob;
-                })
-            );
-            jobs.push(...transformedJobs);
-        }
-        return jobs;
+        const queryStatuses = status ? [status] : JOB_STATUS;
+        
+        console.info('[QueueService] getDataJobs: Starting', { 
+            queueCount: queueNames.length, 
+            statusCount: queryStatuses.length,
+            hasProcessId: !!processId 
+        });
+        
+        // Parallelize queue fetching with error handling
+        const queuePromises = queueNames.map(async (queueName) => {
+            try {
+                const queue = await this.getQueue(queueName);
+                const queueJobs: DataJob[] = [];
+                
+                // Query each status separately to avoid individual getState() calls
+                // Trade-off: 8 queries instead of 1, but eliminates 1000+ getState() calls
+                // When we query getJobs([status]), we know all returned jobs have that status
+                // This avoids calling job.getState() for each job (which is a separate Redis query)
+                for(const statusToQuery of queryStatuses) {
+                    try {
+                        const rawJobs = await queue.getJobs([statusToQuery] as JobType[]);
+                        
+                        const filteredRawJobs = processId
+                            ? rawJobs.filter(job => {
+                                const pid = job.data?.threadId;
+                                return pid === processId;
+                            })
+                            : rawJobs;
+                        
+                        // Transform with known state - no getState() call needed!
+                        const transformedJobs = await Promise.all(
+                            filteredRawJobs.map(async job => {
+                                const dataJob: DataJob = await transformJobtoBaseJob(job, statusToQuery);
+                                dataJob.data = job.data;
+                                dataJob.returnvalue = job.returnvalue;
+                                return dataJob;
+                            })
+                        );
+                        
+                        queueJobs.push(...transformedJobs);
+                    } catch (statusError) {
+                        // Log error for this status but continue with other statuses
+                        console.error(`[QueueService] Error querying status '${statusToQuery}' for queue '${queueName}':`, statusError);
+                        // Continue processing other statuses
+                    }
+                }
+                
+                return queueJobs;
+            } catch (queueError) {
+                // Log error for this queue but continue with other queues
+                console.error(`[QueueService] Error processing queue '${queueName}':`, queueError);
+                // Return empty array so Promise.all doesn't fail completely
+                return [];
+            }
+        });
+        
+        // Wait for all queues to complete in parallel
+        // Using Promise.allSettled to handle partial failures gracefully
+        const results = await Promise.allSettled(queuePromises);
+        
+        // Extract successful results, log failures
+        const successfulResults: DataJob[][] = [];
+        results.forEach((result, index) => {
+            if (result.status === 'fulfilled') {
+                successfulResults.push(result.value);
+            } else {
+                console.error(`[QueueService] Queue promise rejected for queue '${queueNames![index]}':`, result.reason);
+            }
+        });
+        
+        // Flatten array of arrays into single array
+        const allJobs = successfulResults.flat();
+        const duration = Date.now() - startTime;
+        console.info('[QueueService] getDataJobs: Completed', { 
+            jobCount: allJobs.length,
+            durationMs: duration,
+            queuesProcessed: successfulResults.length,
+            queuesTotal: queueNames.length
+        });
+        
+        return allJobs;
     }
 
     public async addJob(queueName: string, url: string, autoApprove: boolean = false, options?: { forceReindex?: boolean; threadId?: string; replaceAllEmissions?: boolean; runOnly?: string[] }): Promise<BaseJob> {
@@ -690,7 +810,7 @@ export class QueueService {
     }
 }
 
-export async function transformJobtoBaseJob(job: Job): Promise<BaseJob> {
+export async function transformJobtoBaseJob(job: Job, state?: string): Promise<BaseJob> {
     return {
         name: job.name,
         queue: job.queueName,
@@ -709,6 +829,6 @@ export async function transformJobtoBaseJob(job: Job): Promise<BaseJob> {
         progress: typeof job.progress === 'number' ? job.progress : undefined,
         opts: job.opts,
         delay: job.delay,
-        status: (await job.getState()) as JobType
+        status: (state ?? (await job.getState())) as JobType
     };
 }
