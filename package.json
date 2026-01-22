@@ -1,6 +1,6 @@
 {
   "name": "pipeline-status",
-  "version": "0.1.0",
+  "version": "0.1.1-rc.0",
   "scripts": {
     "build": "tsc",
     "start": "node --max-old-space-size=4096 --import tsx src/index.ts",
