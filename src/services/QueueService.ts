@@ -230,6 +230,7 @@ export class QueueService {
         cache?: {
             extractEmissionsByThreadId?: Map<string, DataJob>;
             fiscalYearByThreadId?: Map<string, any | undefined>;
+            wikidataByThreadId?: Map<string, any | undefined>;
         }
     ): Promise<DataJob> {
         console.info('[QueueService] rerunExtractEmissionsFromFollowup: Starting', {
@@ -249,6 +250,10 @@ export class QueueService {
             cache?.fiscalYearByThreadId?.get(threadId) ??
             await this.getLatestFiscalYearForThread(threadId);
 
+        const wikidata =
+            cache?.wikidataByThreadId?.get(threadId) ??
+            await this.getWikidataFromCheckDBJob(threadId);
+
         const companyName = this.getCompanyNameFromJobs(
             extractEmissionsJob,
             followupJob,
@@ -259,7 +264,8 @@ export class QueueService {
             followupJob,
             extractEmissionsJob,
             fiscalYear,
-            scopes
+            scopes,
+            wikidata
         );
 
         const newJob = await this.enqueueExtractRerun(companyName, mergedData);
@@ -336,13 +342,13 @@ export class QueueService {
         extractEmissionsJob: DataJob,
         fiscalYear: any | undefined,
         scopes: string[],
+        wikidata: any | undefined,
     ): any {
         const extractData: any = extractEmissionsJob.data ?? {};
-        const followupData: any = followupJob.data ?? {};
 
         return {
             ...extractData,
-            ...(followupData.wikidata ? { wikidata: followupData.wikidata } : {}),
+            ...(wikidata ? { wikidata } : {}),
             ...(fiscalYear ? { fiscalYear } : {}),
             runOnly: scopes,
         };
@@ -400,6 +406,78 @@ export class QueueService {
                 error: err,
             });
             return undefined;
+        }
+    }
+
+    private async getWikidataFromCheckDBJob(threadId: string): Promise<any | undefined> {
+        try {
+            const checkDBJobs = await this.getDataJobs(
+                [QUEUE_NAMES.CHECK_DB],
+                undefined,
+                threadId
+            );
+
+            if (checkDBJobs.length === 0) {
+                console.info('[QueueService] getWikidataFromCheckDBJob: No CHECK_DB jobs found', { threadId });
+                return undefined;
+            }
+
+            const latestCheckDB = checkDBJobs.sort(
+                (firstJob, secondJob) => (secondJob.timestamp ?? 0) - (firstJob.timestamp ?? 0)
+            )[0];
+
+            const jobData: any = latestCheckDB.data ?? {};
+            const wikidata = jobData.wikidata ?? undefined;
+            console.info('[QueueService] getWikidataFromCheckDBJob: Result', {
+                threadId,
+                hasWikidata: !!wikidata,
+                wikidataNode: wikidata?.node,
+            });
+            return wikidata;
+        } catch (err) {
+            console.warn('[QueueService] getWikidataFromCheckDBJob: Failed to fetch CHECK_DB jobs', {
+                threadId,
+                error: err,
+            });
+            return undefined;
+        }
+    }
+
+    private async buildWikidataCache(
+        threadIds: string[]
+    ): Promise<Map<string, any | undefined>> {
+        const targetThreadIds = new Set(threadIds);
+
+        try {
+            const checkDBJobs = await this.getDataJobs([QUEUE_NAMES.CHECK_DB]);
+            const wikidataByThreadId = new Map<string, any | undefined>();
+
+            for (const job of checkDBJobs) {
+                const jobData: any = job.data ?? {};
+                const jobThreadId: string | undefined =
+                    jobData.threadId ?? job.threadId ?? job.processId;
+
+                if (!jobThreadId || !targetThreadIds.has(jobThreadId)) {
+                    continue;
+                }
+
+                if (!wikidataByThreadId.has(jobThreadId)) {
+                    wikidataByThreadId.set(jobThreadId, jobData.wikidata ?? undefined);
+                }
+            }
+
+            console.info('[QueueService] buildWikidataCache: Built cache', {
+                requested: targetThreadIds.size,
+                found: wikidataByThreadId.size,
+                withWikidata: Array.from(wikidataByThreadId.values()).filter(Boolean).length,
+            });
+
+            return wikidataByThreadId;
+        } catch (error) {
+            console.warn('[QueueService] buildWikidataCache: Failed to build wikidata cache', {
+                error,
+            });
+            return new Map<string, any | undefined>();
         }
     }
 
@@ -556,10 +634,12 @@ export class QueueService {
 
         const extractEmissionsByThreadId = await this.buildExtractEmissionsJobCache(threadIdsToRerun);
         const fiscalYearByThreadId = await this.buildFiscalYearCache(threadIdsToRerun);
+        const wikidataByThreadId = await this.buildWikidataCache(threadIdsToRerun);
 
         const rerunCache = {
             extractEmissionsByThreadId,
             fiscalYearByThreadId,
+            wikidataByThreadId,
         };
 
         await this.rerunSelectedJobs(limitedJobsToRerun, workerName, rerunCache);
@@ -662,6 +742,7 @@ export class QueueService {
         cache: {
             extractEmissionsByThreadId: Map<string, DataJob>;
             fiscalYearByThreadId: Map<string, any | undefined>;
+            wikidataByThreadId: Map<string, any | undefined>;
         }
     ): Promise<void> {
         console.info('[QueueService] rerunJobsByWorkerName: Deduplicated and limited', {
