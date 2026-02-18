@@ -5,4 +5,4 @@ resources:
   - ../../base
 images:
   - name: ghcr.io/klimatbyran/pipeline-api
-    newTag: '0.1.1-rc.0' # {"$imagepolicy": "flux-system:pipeline-api-stage:tag"}
+    newTag: '0.1.2' # {"$imagepolicy": "flux-system:pipeline-api-stage:tag"}
