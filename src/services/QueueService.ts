@@ -252,7 +252,7 @@ export class QueueService {
 
         const wikidata =
             cache?.wikidataByThreadId?.get(threadId) ??
-            await this.getWikidataFromCheckDBJob(threadId);
+            await this.getWikidataFromGuessWikidataJob(threadId);
 
         const companyName = this.getCompanyNameFromJobs(
             extractEmissionsJob,
@@ -409,33 +409,46 @@ export class QueueService {
         }
     }
 
-    private async getWikidataFromCheckDBJob(threadId: string): Promise<any | undefined> {
+    private async getWikidataFromGuessWikidataJob(threadId: string): Promise<any | undefined> {
         try {
-            const checkDBJobs = await this.getDataJobs(
-                [QUEUE_NAMES.CHECK_DB],
-                undefined,
+            const guessWikidataJobs = await this.getDataJobs(
+                [QUEUE_NAMES.GUESS_WIKIDATA],
+                'completed',
                 threadId
             );
 
-            if (checkDBJobs.length === 0) {
-                console.info('[QueueService] getWikidataFromCheckDBJob: No CHECK_DB jobs found', { threadId });
+            if (guessWikidataJobs.length === 0) {
+                console.info('[QueueService] getWikidataFromGuessWikidataJob: No completed GUESS_WIKIDATA jobs found', { threadId });
                 return undefined;
             }
 
-            const latestCheckDB = checkDBJobs.sort(
+            const latestJob = guessWikidataJobs.sort(
                 (firstJob, secondJob) => (secondJob.timestamp ?? 0) - (firstJob.timestamp ?? 0)
             )[0];
 
-            const jobData: any = latestCheckDB.data ?? {};
-            const wikidata = jobData.wikidata ?? undefined;
-            console.info('[QueueService] getWikidataFromCheckDBJob: Result', {
+            const returnValue = latestJob.returnvalue;
+            let parsed: any;
+            if (typeof returnValue === 'string') {
+                try {
+                    parsed = JSON.parse(returnValue);
+                } catch {
+                    return undefined;
+                }
+            } else if (returnValue && typeof returnValue === 'object') {
+                parsed = returnValue;
+            } else {
+                return undefined;
+            }
+
+            const wikidata = parsed?.wikidata ?? undefined;
+            console.info('[QueueService] getWikidataFromGuessWikidataJob: Result', {
                 threadId,
                 hasWikidata: !!wikidata,
                 wikidataNode: wikidata?.node,
             });
             return wikidata;
         } catch (err) {
-            console.warn('[QueueService] getWikidataFromCheckDBJob: Failed to fetch CHECK_DB jobs', {
+            console.warn('[QueueService] getWikidataFromGuessWikidataJob: Failed to fetch GUESS_WIKIDATA jobs', {
                 threadId,
                 error: err,
             });
@@ -449,20 +462,28 @@ export class QueueService {
         const targetThreadIds = new Set(threadIds);
 
         try {
-            const checkDBJobs = await this.getDataJobs([QUEUE_NAMES.CHECK_DB]);
+            const guessWikidataJobs = await this.getDataJobs([QUEUE_NAMES.GUESS_WIKIDATA], 'completed');
             const wikidataByThreadId = new Map<string, any | undefined>();
 
-            for (const job of checkDBJobs) {
-                const jobData: any = job.data ?? {};
+            for (const job of guessWikidataJobs) {
                 const jobThreadId: string | undefined =
-                    jobData.threadId ?? job.threadId ?? job.processId;
+                    (job.data as any)?.threadId ?? job.threadId ?? job.processId;
 
                 if (!jobThreadId || !targetThreadIds.has(jobThreadId)) {
                     continue;
                 }
 
                 if (!wikidataByThreadId.has(jobThreadId)) {
-                    wikidataByThreadId.set(jobThreadId, jobData.wikidata ?? undefined);
+                    const returnValue = job.returnvalue;
+                    let parsed: any;
+                    if (typeof returnValue === 'string') {
+                        try { parsed = JSON.parse(returnValue); } catch { continue; }
+                    } else if (returnValue && typeof returnValue === 'object') {
+                        parsed = returnValue;
+                    } else {
+                        continue;
+                    }
+                    wikidataByThreadId.set(jobThreadId, parsed?.wikidata ?? undefined);
                 }
             }
 
