@@ -22,8 +22,8 @@ export class ProcessService {
         return this.createProcess(jobs);
     }
 
-    public async getProcesses(): Promise<Process[]> {
-        const jobs = await this.queueService.getDataJobs(undefined, undefined);
+    public async getProcesses(batchId?: string): Promise<Process[]> {
+        const jobs = await this.queueService.getDataJobs(undefined, undefined, undefined, batchId);
         // Debug: log number of jobs fetched across all queues
         // Using console here; Fastify logger isn't directly available in service layer
         console.info('[ProcessService] getProcesses: jobs fetched', { count: jobs.length });
@@ -53,8 +53,8 @@ export class ProcessService {
         return processes;
     }
 
-    public async getProcessesGroupedByCompany(): Promise<CompanyProcess[]> {
-            const processes = await this.getProcesses();
+    public async getProcessesGroupedByCompany(batchId?: string): Promise<CompanyProcess[]> {
+            const processes = await this.getProcesses(batchId);
             const companyProcesses: Record<string, CompanyProcess> = {};
             for(const process of processes) {
                 // Use the process's company name, or "unknown" if not available
@@ -76,10 +76,24 @@ export class ProcessService {
             return grouped;
         }
 
-    public async getPagedCompanyProcesses(page: number, pageSize: number): Promise<CompanyProcess[]> {
-        const allCompanyProcesses = await this.getProcessesGroupedByCompany();
+    public async getPagedCompanyProcesses(page: number, pageSize: number, batchId?: string): Promise<CompanyProcess[]> {
+        const allCompanyProcesses = await this.getProcessesGroupedByCompany(batchId);
         const sortedCompanyProcesses = this.sortCompanyProcessesByName(allCompanyProcesses);
         return this.getCompanyProcessesPage(sortedCompanyProcesses, page, pageSize);
+    }
+
+    /**
+     * Returns unique batch IDs present in job data. Scans all jobs (no index);
+     * may be slow with very large job counts.
+     */
+    public async getAvailableBatches(): Promise<string[]> {
+        const jobs = await this.queueService.getDataJobs(undefined, undefined);
+        const batchIds = new Set<string>();
+        for (const job of jobs) {
+            const bid = (job.data as { batchId?: string })?.batchId;
+            if (bid && typeof bid === 'string') batchIds.add(bid);
+        }
+        return Array.from(batchIds).sort();
     }
 
     private createProcess(jobs: DataJob[]): Process {
