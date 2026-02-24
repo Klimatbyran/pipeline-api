@@ -69,7 +69,7 @@ export class QueueService {
         return queue;
     }
 
-    public async getJobs(queueNames?: string[], status?: string, processId?: string): Promise<BaseJob[]> {
+    public async getJobs(queueNames?: string[], status?: string, processId?: string, batchId?: string): Promise<BaseJob[]> {
         if(!queueNames  || queueNames.length === 0) {
             queueNames = Object.values(QUEUE_NAMES);
         }
@@ -78,12 +78,11 @@ export class QueueService {
         for(const queueName of queueNames) {
              const queue = await this.getQueue(queueName);
             const rawJobs = await queue.getJobs(queryStatus as JobType[]);
-            const filteredRawJobs = processId
-                ? rawJobs.filter(job => {
-                    const pid = job.data?.threadId;
-                    return pid === processId;
-                })
-                : rawJobs;
+            const filteredRawJobs = rawJobs.filter(job => {
+                if (processId && job.data?.threadId !== processId) return false;
+                if (batchId != null && (job.data as any)?.batchId !== batchId) return false;
+                return true;
+            });
             const transformedJobs = await Promise.all(
                 filteredRawJobs.map(job => transformJobtoBaseJob(job))
             );
@@ -92,7 +91,7 @@ export class QueueService {
         return jobs;
     }
 
-    public async getDataJobs(queueNames?: string[], status?: string, processId?: string): Promise<DataJob[]> {
+    public async getDataJobs(queueNames?: string[], status?: string, processId?: string, batchId?: string): Promise<DataJob[]> {
         if(!queueNames  || queueNames.length === 0) {
             queueNames = Object.values(QUEUE_NAMES);
         }
@@ -101,12 +100,11 @@ export class QueueService {
         for(const queueName of queueNames) {
              const queue = await this.getQueue(queueName);
             const rawJobs = await queue.getJobs(queryStatus as JobType[]);
-            const filteredRawJobs = processId
-                ? rawJobs.filter(job => {
-                    const pid = job.data?.threadId;
-                    return pid === processId;
-                })
-                : rawJobs;
+            const filteredRawJobs = rawJobs.filter(job => {
+                if (processId && job.data?.threadId !== processId) return false;
+                if (batchId != null && (job.data as any)?.batchId !== batchId) return false;
+                return true;
+            });
             const transformedJobs = await Promise.all(
                 filteredRawJobs.map(async job => {
                     const dataJob: DataJob = await transformJobtoBaseJob(job);                    
@@ -120,7 +118,7 @@ export class QueueService {
         return jobs;
     }
 
-    public async addJob(queueName: string, url: string, autoApprove: boolean = false, options?: { forceReindex?: boolean; threadId?: string; replaceAllEmissions?: boolean; runOnly?: string[] }): Promise<BaseJob> {
+    public async addJob(queueName: string, url: string, autoApprove: boolean = false, options?: { forceReindex?: boolean; threadId?: string; replaceAllEmissions?: boolean; runOnly?: string[]; batchId?: string }): Promise<BaseJob> {
         const queue = await this.getQueue(queueName);
         const id = crypto.randomUUID();
         const job = await queue.add('download ' + url.slice(-20), {
@@ -130,7 +128,8 @@ export class QueueService {
             ...(options?.threadId ? { threadId: options.threadId } : {}),
             ...(options?.forceReindex !== undefined ? { forceReindex: options.forceReindex } : {}),
             ...(options?.replaceAllEmissions !== undefined ? { replaceAllEmissions: options.replaceAllEmissions } : {}),
-            ...(options?.runOnly ? { runOnly: options.runOnly } : {})
+            ...(options?.runOnly ? { runOnly: options.runOnly } : {}),
+            ...(options?.batchId ? { batchId: options.batchId } : {}),
         });
         return transformJobtoBaseJob(job);
     }

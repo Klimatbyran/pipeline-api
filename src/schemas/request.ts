@@ -9,6 +9,10 @@ export const readProcessPathParamsSchema = z.object({
     id: z.string()
 });
 
+export const readProcessesQueryStringSchema = z.object({
+    batchId: z.string().optional().describe('Filter to processes in this batch only'),
+});
+
 export const readQueueQueryStringSchema = z.object({
     status: jobStatusSchema.optional()
 });
@@ -25,6 +29,7 @@ export const readQueueJobPathParamsSchema = z.object({
 export const readProcessesByCompanyQueryStringSchema = z.object({
     page: z.coerce.number().int().min(1).optional(),
     pageSize: z.coerce.number().int().min(1).max(500).optional(),
+    batchId: z.string().optional().describe('Filter to processes (reports) in this batch only'),
 });
 
 // Accept both camelCase and kebab-case for the reindex flag.
@@ -35,7 +40,8 @@ export const addQueueJobBodySchema = z.object({
     urls: z.array(string().url()),
     forceReindex: z.boolean().optional().describe('Re-index markdown even if already indexed'),
     replaceAllEmissions: z.boolean().optional().default(false).describe('Replace all scope 1,2,3 emissions and totals (delete old ones from all periods) before adding new ones'),
-    runOnly: z.array(z.string()).optional().describe('Array of worker/queue names to run (limits pipeline execution to specified steps)')
+    runOnly: z.array(z.string()).optional().describe('Array of worker/queue names to run (limits pipeline execution to specified steps)'),
+    batchId: z.string().optional().describe('Optional batch ID to group related reports for filtering'),
 });
 
 export const rerunQueueJobBodySchema = z.object({

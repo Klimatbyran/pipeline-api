@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest } from "fastify";
-import { QueueService } from "../services/QueueService";
+import { z } from "zod";
 import { processesGroupedByCompanyResponseSchema, processesResponseSchema, processResponseSchema } from "../schemas/response";
-import { readProcessPathParamsSchema, readProcessesByCompanyQueryStringSchema } from "../schemas/request";
+import { readProcessPathParamsSchema, readProcessesByCompanyQueryStringSchema, readProcessesQueryStringSchema } from "../schemas/request";
 import { ProcessService } from "../services/ProcessService";
 
 export async function readProcessRoute(app: FastifyInstance) {
@@ -10,23 +10,44 @@ export async function readProcessRoute(app: FastifyInstance) {
     {
       schema: {
         summary: 'Get processes',
-        description: '',
+        description: 'Optional batchId filters to processes (reports) in that batch only.',
         tags: ['Process'],
+        querystring: readProcessesQueryStringSchema,
         response: {
           200: processesResponseSchema
         },
       },
     },
     async (
-      _request,
+      request: FastifyRequest<{ Querystring: { batchId?: string } }>,
       reply
     ) => {
+      const batchId = request.query.batchId;
       const processService = await ProcessService.getProcessService();
-      const processes = await processService.getProcesses();      
+      const processes = await processService.getProcesses(batchId);      
       return reply.send(processes)
     }
   ); 
   
+  app.get(
+    '/batches',
+    {
+      schema: {
+        summary: 'List available batch IDs',
+        description: 'Returns unique batch IDs from all jobs. Use batchId query on /companies to filter by batch.',
+        tags: ['Process'],
+        response: {
+          200: z.object({ batches: z.array(z.string()) }),
+        },
+      },
+    },
+    async (_request, reply) => {
+      const processService = await ProcessService.getProcessService();
+      const batches = await processService.getAvailableBatches();
+      return reply.send({ batches });
+    },
+  );
+
   app.get(
     '/companies',
     {
@@ -42,17 +63,19 @@ export async function readProcessRoute(app: FastifyInstance) {
     },
     async (
       request: FastifyRequest<{
-        Querystring: { page?: number; pageSize?: number };
+        Querystring: { page?: number; pageSize?: number; batchId?: string };
       }>,
       reply
     ) => {
       const requestedPage = request.query.page ?? 1;
       const requestedPageSize = request.query.pageSize ?? 100;
+      const batchId = request.query.batchId;
 
       const processService = await ProcessService.getProcessService();
       const companyProcesses = await processService.getPagedCompanyProcesses(
         requestedPage,
         requestedPageSize,
+        batchId,
       ); 
       return reply.send(companyProcesses)
     }
