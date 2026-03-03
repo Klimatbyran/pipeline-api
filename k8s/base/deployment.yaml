@@ -21,10 +21,10 @@ spec:
           resources:
             requests:
               memory: "2048Mi"
-              cpu: "500m"
+              cpu: "250m"
             limits:
               memory: "4096Mi"
-              cpu: "1000m"
+              cpu: "500m"
           ports:
             - containerPort: 4000
           env:
