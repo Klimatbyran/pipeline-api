@@ -7,6 +7,8 @@ import { STATUS, QUEUE_NAMES } from "../lib/bullmq";
 import { JobType } from "bullmq";
 import { addQueueJobBodySchema, readQueueJobPathParamsSchema, readQueuePathParamsSchema, readQueueQueryStringSchema, readQueueStatsQueryStringSchema, rerunAndSaveQueueJobBodySchema, rerunJobsByWorkerBodySchema, rerunQueueJobBodySchema } from "../schemas/request";
 import { z } from "zod";
+import { uploadPdfAndGetUrl } from "../services/S3UploadService";
+import { isS3Configured } from "../config/s3";
 
 export async function readQueuesRoute(app: FastifyInstance) {
   app.get(
@@ -64,6 +66,120 @@ export async function readQueuesRoute(app: FastifyInstance) {
     }
   );
 
+  // File upload for parsePdf: must be registered before POST /:name so path parsePdf/upload is matched
+  app.post(
+    '/parsePdf/upload',
+    {
+      schema: {
+        summary: 'Upload PDFs and add parsePdf jobs',
+        description: 'Accept multipart/form-data with PDF files and optional options (autoApprove, batchId, forceReindex, replaceAllEmissions, runOnly, tags). Same job shape as URL-based POST /queues/parsePdf. Requires S3_BUCKET (and optionally AWS_REGION) to be set.',
+        tags: ['Queues'],
+        consumes: ['multipart/form-data'],
+        response: {
+          200: queueAddJobResponseSchema,
+          400: z.object({ error: z.string() }),
+          500: z.object({ error: z.string() }),
+          503: z.object({ error: z.string() }),
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!isS3Configured()) {
+        return reply.status(503).send({
+          error: 'PDF upload is not configured. Set S3_BUCKET (and optionally AWS_REGION) in the environment.',
+        });
+      }
+      const queueService = await QueueService.getQueueService();
+      const options: {
+        autoApprove?: boolean;
+        batchId?: string;
+        forceReindex?: boolean;
+        replaceAllEmissions?: boolean;
+        runOnly?: string[];
+        tags?: string[];
+      } = {};
+      const files: { buffer: Buffer; filename: string }[] = [];
+
+      const parts = (request as any).parts();
+      for await (const part of parts) {
+        if (part.type === 'field') {
+          const value = typeof part.value === 'string' ? part.value : String(part.value ?? '');
+          switch (part.fieldname) {
+            case 'autoApprove':
+              options.autoApprove = value === 'true' || value === '1';
+              break;
+            case 'batchId':
+              options.batchId = value || undefined;
+              break;
+            case 'forceReindex':
+              options.forceReindex = value === 'true' || value === '1';
+              break;
+            case 'replaceAllEmissions':
+              options.replaceAllEmissions = value === 'true' || value === '1';
+              break;
+            case 'runOnly':
+              try {
+                options.runOnly = value ? JSON.parse(value) : undefined;
+              } catch {
+                /* ignore invalid JSON */
+              }
+              break;
+            case 'tags':
+              try {
+                options.tags = value ? JSON.parse(value) : undefined;
+              } catch {
+                /* ignore invalid JSON */
+              }
+              break;
+          }
+        } else if (part.type === 'file') {
+          const buffer = await part.toBuffer();
+          const filename = part.filename ?? 'report.pdf';
+          if (buffer.length > 0) {
+            files.push({ buffer, filename });
+          }
+        }
+      }
+
+      if (files.length === 0) {
+        return reply.status(400).send({ error: 'At least one PDF file is required (multipart field name: file or files).' });
+      }
+
+      const addedJobs: BaseJob[] = [];
+      for (const { buffer, filename } of files) {
+        let url: string;
+        try {
+          url = await uploadPdfAndGetUrl(buffer, filename);
+        } catch (err: any) {
+          request.log.warn({ err, filename }, 'S3 upload failed');
+          return reply.status(500).send({
+            error: err?.message ?? 'Failed to upload PDF to storage.',
+          });
+        }
+        const perUrlThreadId = randomUUID();
+        const addedJob = await queueService.addJob(QUEUE_NAMES.PARSE_PDF, url, options.autoApprove ?? false, {
+          forceReindex: options.forceReindex,
+          threadId: perUrlThreadId,
+          replaceAllEmissions: options.replaceAllEmissions,
+          runOnly: options.runOnly,
+          batchId: options.batchId,
+          tags: options.tags,
+        });
+        addedJobs.push(addedJob);
+      }
+
+      app.log.info(
+        {
+          queue: 'parsePdf',
+          uploadCount: files.length,
+          ...options,
+        },
+        'ParsePdf upload request completed'
+      );
+      return reply.send(addedJobs);
+    }
+  );
+
   app.post(
     '/:name',
     {
@@ -90,7 +206,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
       if (!resolvedName) {
         return reply.status(400).send({ error: `Unknown queue '${name}'. Valid queues: ${Object.values(QUEUE_NAMES).join(', ')}` });
       }
-      const { urls, autoApprove, forceReindex, replaceAllEmissions, runOnly, batchId } = request.body as any;
+      const { urls, autoApprove, forceReindex, replaceAllEmissions, runOnly, batchId, tags } = request.body as any;
       // Log enqueue request (sanitized)
       app.log.info(
         {
@@ -101,6 +217,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
           replaceAllEmissions: !!replaceAllEmissions,
           runOnly: runOnly,
           batchId: batchId ?? undefined,
+          tagsCount: Array.isArray(tags) ? tags.length : 0,
         },
         'Enqueue request received'
       );
@@ -109,7 +226,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
       for(const url of urls) {
         // Generate a unique threadId for each URL; client-provided threadId is ignored
         const perUrlThreadId = randomUUID();
-        const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: perUrlThreadId, replaceAllEmissions, runOnly, batchId });
+        const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: perUrlThreadId, replaceAllEmissions, runOnly, batchId, tags });
         addedJobs.push(addedJob);
       }
       return reply.send(addedJobs);

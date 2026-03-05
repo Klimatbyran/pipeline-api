@@ -1,5 +1,6 @@
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
+import multipart from '@fastify/multipart'
 import fastifySwagger from '@fastify/swagger'
 import scalarPlugin from '@scalar/fastify-api-reference'
 import { readFileSync } from 'fs'
@@ -22,6 +23,13 @@ async function startApp() {
   app.register(cors, {
     origin: apiConfig.corsAllowOrigins as unknown as string[],
     exposedHeaders: ['etag'],
+  })
+
+  await app.register(multipart, {
+    limits: {
+      fileSize: 100 * 1024 * 1024, // 100 MB per file
+      files: 20,
+    },
   })
 
   await app.register(fastifySwagger, {
