@@ -90,7 +90,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
       if (!resolvedName) {
         return reply.status(400).send({ error: `Unknown queue '${name}'. Valid queues: ${Object.values(QUEUE_NAMES).join(', ')}` });
       }
-      const { urls, autoApprove, forceReindex, replaceAllEmissions, runOnly, batchId } = request.body as any;
+      const { urls, autoApprove, forceReindex, replaceAllEmissions, runOnly, batchId, tags } = request.body as any;
       // Log enqueue request (sanitized)
       app.log.info(
         {
@@ -101,6 +101,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
           replaceAllEmissions: !!replaceAllEmissions,
           runOnly: runOnly,
           batchId: batchId ?? undefined,
+          tags: tags ?? undefined,
         },
         'Enqueue request received'
       );
@@ -109,7 +110,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
       for(const url of urls) {
         // Generate a unique threadId for each URL; client-provided threadId is ignored
         const perUrlThreadId = randomUUID();
-        const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: perUrlThreadId, replaceAllEmissions, runOnly, batchId });
+        const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: perUrlThreadId, replaceAllEmissions, runOnly, batchId, tags });
         addedJobs.push(addedJob);
       }
       return reply.send(addedJobs);
