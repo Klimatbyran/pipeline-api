@@ -1,6 +1,7 @@
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import multipart from '@fastify/multipart'
+import { PDF_MAX_BYTES } from './services/S3UploadService'
 import fastifySwagger from '@fastify/swagger'
 import scalarPlugin from '@scalar/fastify-api-reference'
 import { readFileSync } from 'fs'
@@ -27,9 +28,10 @@ async function startApp() {
 
   await app.register(multipart, {
     limits: {
-      fileSize: 100 * 1024 * 1024, // 100 MB per file
+      fileSize: PDF_MAX_BYTES, // 400 MB per file (annual reports with images)
       files: 20,
     },
+    throwFileSizeLimit: true, // reject with 413 and clear error when file exceeds limit
   })
 
   await app.register(fastifySwagger, {

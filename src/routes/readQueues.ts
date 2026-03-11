@@ -78,6 +78,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
         response: {
           200: queueAddJobResponseSchema,
           400: z.object({ error: z.string() }),
+          413: z.object({ error: z.string() }),
           500: z.object({ error: z.string() }),
           503: z.object({ error: z.string() }),
         },
@@ -89,6 +90,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
           error: 'PDF upload is not configured. Set S3_BUCKET (and optionally AWS_REGION) in the environment.',
         });
       }
+      const FILE_TOO_LARGE_MSG = 'File too large. Maximum size is 400 MB per file.';
       const queueService = await QueueService.getQueueService();
       const options: {
         autoApprove?: boolean;
@@ -100,45 +102,52 @@ export async function readQueuesRoute(app: FastifyInstance) {
       } = {};
       const files: { buffer: Buffer; filename: string }[] = [];
 
-      const parts = (request as any).parts();
-      for await (const part of parts) {
-        if (part.type === 'field') {
-          const value = typeof part.value === 'string' ? part.value : String(part.value ?? '');
-          switch (part.fieldname) {
-            case 'autoApprove':
-              options.autoApprove = value === 'true' || value === '1';
-              break;
-            case 'batchId':
-              options.batchId = value || undefined;
-              break;
-            case 'forceReindex':
-              options.forceReindex = value === 'true' || value === '1';
-              break;
-            case 'replaceAllEmissions':
-              options.replaceAllEmissions = value === 'true' || value === '1';
-              break;
-            case 'runOnly':
-              try {
-                options.runOnly = value ? JSON.parse(value) : undefined;
-              } catch {
-                /* ignore invalid JSON */
-              }
-              break;
-            case 'tags':
-              try {
-                options.tags = value ? JSON.parse(value) : undefined;
-              } catch {
-                /* ignore invalid JSON */
-              }
-              break;
-          }
-        } else if (part.type === 'file') {
-          const buffer = await part.toBuffer();
-          const filename = part.filename ?? 'report.pdf';
-          if (buffer.length > 0) {
-            files.push({ buffer, filename });
+      try {
+        const parts = (request as any).parts();
+        for await (const part of parts) {
+          if (part.type === 'field') {
+            const value = typeof part.value === 'string' ? part.value : String(part.value ?? '');
+            switch (part.fieldname) {
+              case 'autoApprove':
+                options.autoApprove = value === 'true' || value === '1';
+                break;
+              case 'batchId':
+                options.batchId = value || undefined;
+                break;
+              case 'forceReindex':
+                options.forceReindex = value === 'true' || value === '1';
+                break;
+              case 'replaceAllEmissions':
+                options.replaceAllEmissions = value === 'true' || value === '1';
+                break;
+              case 'runOnly':
+                try {
+                  options.runOnly = value ? JSON.parse(value) : undefined;
+                } catch {
+                  /* ignore invalid JSON */
+                }
+                break;
+              case 'tags':
+                try {
+                  options.tags = value ? JSON.parse(value) : undefined;
+                } catch {
+                  /* ignore invalid JSON */
+                }
+                break;
+            }
+          } else if (part.type === 'file') {
+            const buffer = await part.toBuffer();
+            const filename = part.filename ?? 'report.pdf';
+            if (buffer.length > 0) {
+              files.push({ buffer, filename });
+            }
           }
         }
+      } catch (err: any) {
+        if (err?.statusCode === 413 || err?.code === 'FST_REQ_FILE_TOO_LARGE') {
+          return reply.status(413).send({ error: FILE_TOO_LARGE_MSG });
+        }
+        throw err;
       }
 
       if (files.length === 0) {
@@ -152,8 +161,9 @@ export async function readQueuesRoute(app: FastifyInstance) {
           url = await uploadPdfAndGetUrl(buffer, filename);
         } catch (err: any) {
           request.log.warn({ err, filename }, 'S3 upload failed');
-          return reply.status(500).send({
-            error: err?.message ?? 'Failed to upload PDF to storage.',
+          const isTooLarge = err?.message?.includes('too large') ?? false;
+          return reply.status(isTooLarge ? 413 : 500).send({
+            error: isTooLarge ? FILE_TOO_LARGE_MSG : (err?.message ?? 'Failed to upload PDF to storage.'),
           });
         }
         const perUrlThreadId = randomUUID();

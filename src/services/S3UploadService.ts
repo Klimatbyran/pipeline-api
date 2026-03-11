@@ -4,7 +4,8 @@ import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getS3Config } from '../config/s3';
 import { randomUUID } from 'crypto';
 
-const PDF_MAX_BYTES = 100 * 1024 * 1024; // 100 MB per file
+/** Max size per PDF (e.g. annual reports with images). Kept in sync with multipart limit in app.ts. */
+export const PDF_MAX_BYTES = 400 * 1024 * 1024; // 400 MB per file
 const PDF_MIME = 'application/pdf';
 
 let client: S3Client | null = null;
