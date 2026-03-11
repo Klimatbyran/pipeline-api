@@ -227,7 +227,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
           replaceAllEmissions: !!replaceAllEmissions,
           runOnly: runOnly,
           batchId: batchId ?? undefined,
-          tagsCount: Array.isArray(tags) ? tags.length : 0,
+          tags: tags ?? undefined,
         },
         'Enqueue request received'
       );

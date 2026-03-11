@@ -42,7 +42,7 @@ export const addQueueJobBodySchema = z.object({
     replaceAllEmissions: z.boolean().optional().default(false).describe('Replace all scope 1,2,3 emissions and totals (delete old ones from all periods) before adding new ones'),
     runOnly: z.array(z.string()).optional().describe('Array of worker/queue names to run (limits pipeline execution to specified steps)'),
     batchId: z.string().optional().describe('Optional batch ID to group related reports for filtering'),
-    tags: z.array(z.string()).optional().describe('Tags to set on the company when syncing to Garbo (create/update). Passed through to Garbo API.'),
+    tags: z.array(z.string()).optional().describe('Optional tags to set on the job/report at creation (e.g. for filtering); passed through to Garbo API. Worker may set or extend tags later'),
 });
 
 export const rerunQueueJobBodySchema = z.object({
