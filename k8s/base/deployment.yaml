@@ -48,15 +48,15 @@ spec:
             - name: S3_BUCKET
               valueFrom:
                 secretKeyRef:
-                  name: env
+                  name: s3-bucket
                   key: S3_BUCKET
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
-                  name: env
+                  name: s3-bucket
                   key: AWS_ACCESS_KEY_ID
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: env
+                  name: s3-bucket
                   key: AWS_SECRET_ACCESS_KEY
