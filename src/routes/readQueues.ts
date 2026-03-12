@@ -166,6 +166,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
             error: isTooLarge ? FILE_TOO_LARGE_MSG : (err?.message ?? 'Failed to upload PDF to storage.'),
           });
         }
+        request.log.info({ filename, url }, 'S3 upload succeeded, adding to BullMQ');
         const perUrlThreadId = randomUUID();
         const addedJob = await queueService.addJob(QUEUE_NAMES.PARSE_PDF, url, options.autoApprove ?? false, {
           forceReindex: options.forceReindex,
@@ -175,6 +176,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
           batchId: options.batchId,
           tags: options.tags,
         });
+        request.log.info({ filename, jobId: addedJob.id }, 'BullMQ job added successfully');
         addedJobs.push(addedJob);
       }
 

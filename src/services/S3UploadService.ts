@@ -13,7 +13,11 @@ let client: S3Client | null = null;
 function getClient(): S3Client {
   if (!client) {
     const { region } = getS3Config();
-    client = new S3Client({ region });
+    const endpoint = process.env.S3_ENDPOINT;
+    client = new S3Client({
+      region,
+      ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
+    });
   }
   return client;
 }
