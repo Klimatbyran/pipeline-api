@@ -85,7 +85,9 @@ async function startApp() {
     );
     
     // Apply JWT validation only to write operations on protected routes
-    if (isWriteOperation && isProtectedRoute && !isPublicPath) {
+    // Skip in development to allow local testing without a JWT secret
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    if (!isDevelopment && isWriteOperation && isProtectedRoute && !isPublicPath) {
       await validateJWT(request, reply);
     }
   });
