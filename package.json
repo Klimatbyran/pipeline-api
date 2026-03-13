@@ -4,7 +4,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node --max-old-space-size=4096 --import tsx src/index.ts",
-    "dev": "node --max-old-space-size=4096 --import tsx --watch src/index.ts"
+    "dev": "node --max-old-space-size=4096 --import tsx --watch src/index.ts",
+    "clean-old-bullmq": "node --max-old-space-size=512 --import tsx scripts/clean-old-bullmq.ts"
   },
   "author": "Christian Landgren, Moritz Zingg et al.",
   "license": "ISC",
