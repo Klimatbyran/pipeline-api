@@ -119,4 +119,4 @@ Authorization: Bearer <your-jwt-token>
 
 If a token is missing, invalid, or expired, the API will return a `401 Unauthorized` response.
 
-**Note**: Read operations (GET) do not require authentication tokens, but the frontend may still require login for user experience.
+**Note**: Read operations (GET) do not require authentication tokens, but the frontend may still require login for user experience
