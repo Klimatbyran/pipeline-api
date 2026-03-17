@@ -1,7 +1,7 @@
 /**
  * S3 configuration for PDF upload (parsePdf/upload endpoint).
  * Only required when using POST /api/queues/parsePdf/upload.
- * Credentials: set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, or use IAM role (e.g. in Kubernetes).
+ * Credentials: set S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY,
  */
 export function getS3Config(): {
   bucket: string;
@@ -9,7 +9,9 @@ export function getS3Config(): {
   presignedExpirySeconds: number;
 } {
   const bucket = process.env.S3_BUCKET;
-  const region = process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? 'eu-north-1';
+  // Many S3-compatible providers ignore region, but the AWS SDK still requires one.
+  // Default matches our current AWS region convention.
+  const region = process.env.S3_REGION ?? 'eu-north-1';
   const presignedExpirySeconds = Math.min(
     Math.max(parseInt(process.env.S3_PRESIGNED_EXPIRY_SECONDS ?? '86400', 10) || 86400, 60),
     604800
@@ -17,7 +19,7 @@ export function getS3Config(): {
 
   if (!bucket?.trim()) {
     throw new Error(
-      'S3 upload is not configured: set S3_BUCKET (and optionally AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) in the environment.'
+      'S3 upload is not configured: set S3_BUCKET (and optionally S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY) in the environment.'
     );
   }
 

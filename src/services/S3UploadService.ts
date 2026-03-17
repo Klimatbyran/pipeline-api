@@ -14,9 +14,22 @@ function getClient(): S3Client {
   if (!client) {
     const { region } = getS3Config();
     const endpoint = process.env.S3_ENDPOINT;
+    const accessKeyId = process.env.S3_ACCESS_KEY_ID;
+    const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY;
+    const sessionToken = process.env.S3_SESSION_TOKEN;
+
     client = new S3Client({
       region,
       ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
+      ...(accessKeyId && secretAccessKey
+        ? {
+            credentials: {
+              accessKeyId,
+              secretAccessKey,
+              ...(sessionToken ? { sessionToken } : {}),
+            },
+          }
+        : {}),
     });
   }
   return client;
