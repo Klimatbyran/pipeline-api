@@ -190,7 +190,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
     {
       schema: {
         summary: 'Upload PDFs and add parsePdf jobs',
-        description: 'Accept multipart/form-data with PDF files and optional options (autoApprove, batchId, forceReindex, replaceAllEmissions, runOnly, tags). Same job shape as URL-based POST /queues/parsePdf. Requires S3_BUCKET (and optionally S3_REGION) to be set.',
+        description: 'Accept multipart/form-data with PDF files and optional options (autoApprove, batchId, forceReindex, replaceAllEmissions, runOnly, tags). Same job shape as URL-based POST /queues/parsePdf. Requires S3_BUCKET to be set.',
         tags: ['Queues'],
         consumes: ['multipart/form-data'],
         response: {
@@ -205,7 +205,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
     async (request, reply) => {
       if (!isS3Configured()) {
         return reply.status(503).send({
-          error: 'PDF upload is not configured. Set S3_BUCKET (and optionally S3_REGION) in the environment.',
+          error: 'PDF upload is not configured. Set S3_BUCKET in the environment.',
         });
       }
       const FILE_TOO_LARGE_MSG = 'File too large. Maximum size is 400 MB per file.';
