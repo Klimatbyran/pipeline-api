@@ -7,6 +7,126 @@ import { STATUS, QUEUE_NAMES } from "../lib/bullmq";
 import { JobType } from "bullmq";
 import { addQueueJobBodySchema, readQueueJobPathParamsSchema, readQueuePathParamsSchema, readQueueQueryStringSchema, readQueueStatsQueryStringSchema, rerunAndSaveQueueJobBodySchema, rerunJobsByWorkerBodySchema, rerunQueueJobBodySchema } from "../schemas/request";
 import { z } from "zod";
+import { uploadPdfAndGetUrl } from "../services/S3UploadService";
+import { isS3Configured } from "../config/s3";
+
+async function uploadAndEnqueueParsePdfJobs(params: {
+  queueService: QueueService;
+  files: { buffer: Buffer; filename: string }[];
+  options: {
+    autoApprove?: boolean;
+    batchId?: string;
+    forceReindex?: boolean;
+    replaceAllEmissions?: boolean;
+    runOnly?: string[];
+    tags?: string[];
+  };
+  request: FastifyRequest;
+  fileTooLargeMessage: string;
+}): Promise<{ ok: true; jobs: BaseJob[] } | { ok: false; status: 413 | 500; error: string }> {
+  const { queueService, files, options, request, fileTooLargeMessage } = params;
+
+  const addedJobs: BaseJob[] = [];
+  for (const { buffer, filename } of files) {
+    let url: string;
+    try {
+      url = await uploadPdfAndGetUrl(buffer, filename);
+    } catch (err: any) {
+      request.log.warn({ err, filename }, 'S3 upload failed');
+      const isTooLarge = err?.message?.includes('too large') ?? false;
+      return {
+        ok: false,
+        status: isTooLarge ? 413 : 500,
+        error: isTooLarge ? fileTooLargeMessage : (err?.message ?? 'Failed to upload PDF to storage.'),
+      };
+    }
+
+    request.log.info({ filename, url }, 'S3 upload succeeded, adding to BullMQ');
+    const perUrlThreadId = randomUUID();
+    const addedJob = await queueService.addJob(QUEUE_NAMES.PARSE_PDF, url, options.autoApprove ?? false, {
+      forceReindex: options.forceReindex,
+      threadId: perUrlThreadId,
+      replaceAllEmissions: options.replaceAllEmissions,
+      runOnly: options.runOnly,
+      batchId: options.batchId,
+      tags: options.tags,
+    });
+    request.log.info({ filename, jobId: addedJob.id }, 'BullMQ job added successfully');
+    addedJobs.push(addedJob);
+  }
+
+  return { ok: true, jobs: addedJobs };
+}
+
+async function parseParsePdfUpload(request: FastifyRequest): Promise<{
+  options: {
+    autoApprove?: boolean;
+    batchId?: string;
+    forceReindex?: boolean;
+    replaceAllEmissions?: boolean;
+    runOnly?: string[];
+    tags?: string[];
+  };
+  files: { buffer: Buffer; filename: string }[];
+}> {
+  const options: {
+    autoApprove?: boolean;
+    batchId?: string;
+    forceReindex?: boolean;
+    replaceAllEmissions?: boolean;
+    runOnly?: string[];
+    tags?: string[];
+  } = {};
+
+  const files: { buffer: Buffer; filename: string }[] = [];
+
+  const parts = (request as any).parts();
+  for await (const part of parts) {
+    if (part.type === 'field') {
+      const raw = part.value;
+      const value = typeof raw === 'string' ? raw : String(raw ?? '');
+
+      switch (part.fieldname) {
+        case 'autoApprove':
+          options.autoApprove = value === 'true' || value === '1';
+          break;
+        case 'batchId': {
+          const s = typeof raw === 'string' ? raw : raw == null ? undefined : String(raw);
+          options.batchId = s ?? undefined;
+          break;
+        }
+        case 'forceReindex':
+          options.forceReindex = value === 'true' || value === '1';
+          break;
+        case 'replaceAllEmissions':
+          options.replaceAllEmissions = value === 'true' || value === '1';
+          break;
+        case 'runOnly':
+          try {
+            options.runOnly = value ? JSON.parse(value) : undefined;
+          } catch {
+            /* ignore invalid JSON */
+          }
+          break;
+        case 'tags':
+          try {
+            options.tags = value ? JSON.parse(value) : undefined;
+          } catch {
+            /* ignore invalid JSON */
+          }
+          break;
+      }
+    } else if (part.type === 'file') {
+      const buffer = await part.toBuffer();
+      const filename = part.filename ?? 'report.pdf';
+      if (buffer.length > 0) {
+        files.push({ buffer, filename });
+      }
+    }
+  }
+
+  return { options, files };
+}
 
 export async function readQueuesRoute(app: FastifyInstance) {
   app.get(
@@ -61,6 +181,78 @@ export async function readQueuesRoute(app: FastifyInstance) {
       const queueService = await QueueService.getQueueService();
       const jobs = await queueService.getJobs([name], status);      
       return reply.send(jobs)
+    }
+  );
+
+  // File upload for parsePdf: must be registered before POST /:name so path parsePdf/upload is matched
+  app.post(
+    '/parsePdf/upload',
+    {
+      schema: {
+        summary: 'Upload PDFs and add parsePdf jobs',
+        description: 'Accept multipart/form-data with PDF files and optional options (autoApprove, batchId, forceReindex, replaceAllEmissions, runOnly, tags). Same job shape as URL-based POST /queues/parsePdf. Requires S3_BUCKET to be set.',
+        tags: ['Queues'],
+        consumes: ['multipart/form-data'],
+        response: {
+          200: queueAddJobResponseSchema,
+          400: z.object({ error: z.string() }),
+          413: z.object({ error: z.string() }),
+          500: z.object({ error: z.string() }),
+          503: z.object({ error: z.string() }),
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!isS3Configured()) {
+        return reply.status(503).send({
+          error: 'PDF upload is not configured. Set S3_BUCKET in the environment.',
+        });
+      }
+      const FILE_TOO_LARGE_MSG = 'File too large. Maximum size is 400 MB per file.';
+      const queueService = await QueueService.getQueueService();
+      let options: {
+        autoApprove?: boolean;
+        batchId?: string;
+        forceReindex?: boolean;
+        replaceAllEmissions?: boolean;
+        runOnly?: string[];
+        tags?: string[];
+      };
+      let files: { buffer: Buffer; filename: string }[];
+
+      try {
+        ({ options, files } = await parseParsePdfUpload(request));
+      } catch (err: any) {
+        if (err?.statusCode === 413 || err?.code === 'FST_REQ_FILE_TOO_LARGE') {
+          return reply.status(413).send({ error: FILE_TOO_LARGE_MSG });
+        }
+        throw err;
+      }
+
+      if (files.length === 0) {
+        return reply.status(400).send({ error: 'At least one PDF file is required (multipart field name: file or files).' });
+      }
+
+      const uploadResult = await uploadAndEnqueueParsePdfJobs({
+        queueService,
+        files,
+        options,
+        request,
+        fileTooLargeMessage: FILE_TOO_LARGE_MSG,
+      });
+      if (!uploadResult.ok) {
+        return reply.status(uploadResult.status).send({ error: uploadResult.error });
+      }
+
+      app.log.info(
+        {
+          queue: 'parsePdf',
+          uploadCount: files.length,
+          ...options,
+        },
+        'ParsePdf upload request completed'
+      );
+      return reply.send(uploadResult.jobs);
     }
   );
 

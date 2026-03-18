@@ -42,7 +42,22 @@ The following environment variables are available:
 - `REDIS_PASSWORD`: Redis password (optional)
 - `API_BASE_URL`: Base URL for the API (default: `http://localhost:3001`)
 
+**Optional (PDF upload to object storage):**
+- `S3_BUCKET`: Bucket name used for `POST /api/queues/parsePdf/upload` (required only if you use that endpoint)
+- `S3_ENDPOINT`: S3-compatible endpoint URL (optional; set when using a non-AWS provider/custom endpoint)
+- `S3_REGION`: AWS SDK client region (optional; defaults to `eu-north-1`)
+- `S3_PRESIGNED_EXPIRY_SECONDS`: Presigned GET URL expiry seconds (optional; default `86400`, min `60`, max `604800`)
+- `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_SESSION_TOKEN`: Optional credentials if not using workload identity/role-based auth
+
 Create a `.env` file in the root directory with these variables.
+
+### PDF Upload (parsePdf)
+
+If you need to upload PDF files directly (instead of passing URLs), use:
+
+- `POST /api/queues/parsePdf/upload` (`multipart/form-data`)
+
+This endpoint uploads PDFs to object storage and enqueues `parsePdf` jobs using a presigned GET URL. It requires `S3_BUCKET` (and optionally other `S3_*` env vars listed above).
 
 ### Installation
 

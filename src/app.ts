@@ -1,5 +1,7 @@
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
+import multipart from '@fastify/multipart'
+import { PDF_MAX_BYTES } from './services/S3UploadService'
 import fastifySwagger from '@fastify/swagger'
 import scalarPlugin from '@scalar/fastify-api-reference'
 import { readFileSync } from 'fs'
@@ -22,6 +24,14 @@ async function startApp() {
   app.register(cors, {
     origin: apiConfig.corsAllowOrigins as unknown as string[],
     exposedHeaders: ['etag'],
+  })
+
+  await app.register(multipart, {
+    limits: {
+      fileSize: PDF_MAX_BYTES, // 400 MB per file (annual reports with images)
+      files: 20,
+    },
+    throwFileSizeLimit: true, // reject with 413 and clear error when file exceeds limit
   })
 
   await app.register(fastifySwagger, {
@@ -75,7 +85,9 @@ async function startApp() {
     );
     
     // Apply JWT validation only to write operations on protected routes
-    if (isWriteOperation && isProtectedRoute && !isPublicPath) {
+    // Skip in development to allow local testing without a JWT secret
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    if (!isDevelopment && isWriteOperation && isProtectedRoute && !isPublicPath) {
       await validateJWT(request, reply);
     }
   });

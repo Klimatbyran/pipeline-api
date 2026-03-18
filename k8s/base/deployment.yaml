@@ -45,3 +45,18 @@ spec:
                   key: redis-password
             - name: REDIS_HOST
               value: redis-master.garbo-stage.svc.cluster.local
+            - name: S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: s3-bucket
+                  key: S3_BUCKET
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: s3-bucket
+                  key: S3_ACCESS_KEY_ID
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: s3-bucket
+                  key: S3_SECRET_ACCESS_KEY
