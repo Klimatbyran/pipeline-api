@@ -1,6 +1,7 @@
 import { QUEUE_NAMES } from "../lib/bullmq";
 import { BaseJob, CompanyProcess, DataJob, Process, ProcessStatus } from "../schemas/types";
 import { QueueService } from "./QueueService";
+import { isArchiveConfigured, getBatchIdsFromArchive } from "./ArchiveService";
 
 export class ProcessService {
     private static processService: ProcessService
@@ -83,10 +84,17 @@ export class ProcessService {
     }
 
     /**
-     * Returns unique batch IDs present in job data. Scans all jobs (no index);
-     * may be slow with very large job counts.
+     * Returns unique batch IDs. When archive is configured, reads from Postgres (fast, full history).
+     * Otherwise scans Redis jobs (slower, last 30 days only).
      */
     public async getAvailableBatches(): Promise<string[]> {
+        if (isArchiveConfigured()) {
+            try {
+                return await getBatchIdsFromArchive();
+            } catch (err) {
+                console.warn('[ProcessService] getAvailableBatches: archive failed, falling back to Redis', err);
+            }
+        }
         const jobs = await this.queueService.getDataJobs(undefined, undefined);
         const batchIds = new Set<string>();
         for (const job of jobs) {

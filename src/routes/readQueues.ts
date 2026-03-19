@@ -26,6 +26,8 @@ async function uploadAndEnqueueParsePdfJobs(params: {
 }): Promise<{ ok: true; jobs: BaseJob[] } | { ok: false; status: 413 | 500; error: string }> {
   const { queueService, files, options, request, fileTooLargeMessage } = params;
 
+  // One batchId per upload so all jobs in this request share it (for JobRunArchive / comparison).
+  const requestBatchId = options.batchId ?? randomUUID();
   const addedJobs: BaseJob[] = [];
   for (const { buffer, filename } of files) {
     let url: string;
@@ -48,7 +50,7 @@ async function uploadAndEnqueueParsePdfJobs(params: {
       threadId: perUrlThreadId,
       replaceAllEmissions: options.replaceAllEmissions,
       runOnly: options.runOnly,
-      batchId: options.batchId,
+      batchId: requestBatchId,
       tags: options.tags,
     });
     request.log.info({ filename, jobId: addedJob.id }, 'BullMQ job added successfully');
@@ -298,11 +300,13 @@ export async function readQueuesRoute(app: FastifyInstance) {
         'Enqueue request received'
       );
       const queueService = await QueueService.getQueueService();
+      // One batchId per request so all jobs in this run share it (for JobRunArchive / comparison).
+      const requestBatchId = batchId ?? randomUUID();
       const addedJobs: BaseJob[] = [];
       for(const url of urls) {
         // Generate a unique threadId for each URL; client-provided threadId is ignored
         const perUrlThreadId = randomUUID();
-        const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: perUrlThreadId, replaceAllEmissions, runOnly, batchId, tags });
+        const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: perUrlThreadId, replaceAllEmissions, runOnly, batchId: requestBatchId, tags });
         addedJobs.push(addedJob);
       }
       return reply.send(addedJobs);
