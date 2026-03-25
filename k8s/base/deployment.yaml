@@ -60,3 +60,8 @@ spec:
                 secretKeyRef:
                   name: s3-bucket
                   key: S3_SECRET_ACCESS_KEY
+            - name: S3_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: s3-bucket
+                  key: S3_ENDPOINT
