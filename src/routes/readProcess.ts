@@ -56,9 +56,6 @@ export async function readProcessRoute(app: FastifyInstance) {
         description: '',
         tags: ['Process'],
         querystring: readProcessesByCompanyQueryStringSchema,
-        response: {
-          200: processesGroupedByCompanyResponseSchema
-        },
       },
     },
     async (
@@ -76,7 +73,24 @@ export async function readProcessRoute(app: FastifyInstance) {
         requestedPage,
         requestedPageSize,
         batchId,
-      ); 
+      );
+      const parsed = processesGroupedByCompanyResponseSchema.safeParse(companyProcesses);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          const [ci, , pi, , ji] = issue.path;
+          const job = typeof ci === 'number' && typeof pi === 'number' && typeof ji === 'number'
+            ? companyProcesses[ci]?.processes[pi]?.jobs[ji]
+            : undefined;
+          request.log.error({
+            path: issue.path,
+            message: issue.message,
+            code: issue.code,
+            jobId: job?.id,
+            jobName: job?.name,
+            jobQueue: job?.queue,
+          }, 'Response schema validation failed');
+        }
+      }
       return reply.send(companyProcesses)
     }
   ); 
