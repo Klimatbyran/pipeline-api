@@ -1,6 +1,9 @@
 import { JobType, Queue } from "bullmq"
 import redis from "../config/redis"
 
+/** Keep completed/failed job data in Redis for 30 days. Long-term history lives in garbo's JobRunArchive (Postgres). */
+const REDIS_JOB_RETENTION_AGE_SEC = 30 * 24 * 3600
+
 export type STATUS = 'active' | 'waiting' | 'waiting-children' | 'prioritized' | 'completed' | 'failed' | 'delayed' | 'paused';
 export const JOB_STATUS = ['active', 'waiting', 'waiting-children', 'prioritized', 'completed', 'failed', 'delayed', 'paused'];
 
@@ -39,8 +42,16 @@ export const QUEUE_NAMES = {
   WIKIPEDIA_UPLOAD: 'wikipediaUpload',
 }
 
-async function startQueues() {    
-    const queues = Object.values(QUEUE_NAMES).map((name) => new Queue(name, { connection: redis }))
+async function startQueues() {
+    const queues = Object.values(QUEUE_NAMES).map((name) =>
+        new Queue(name, {
+            connection: redis,
+            defaultJobOptions: {
+                removeOnComplete: { age: REDIS_JOB_RETENTION_AGE_SEC },
+                removeOnFail: { age: REDIS_JOB_RETENTION_AGE_SEC },
+            },
+        })
+    )
     await Promise.all(queues.map((queue) => queue.waitUntilReady()))
     return queues
 }

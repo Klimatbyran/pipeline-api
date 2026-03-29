@@ -42,6 +42,9 @@ The following environment variables are available:
 - `REDIS_PASSWORD`: Redis password (optional)
 - `API_BASE_URL`: Base URL for the API (default: `http://localhost:3001`)
 
+**Optional (faster process/batch list from Postgres):**
+- `ARCHIVE_DATABASE_URL`: Postgres connection URL for garbo's JobRunArchive table (read-only). When set, `/api/processes`, `/api/processes/companies`, and `/api/processes/batches` read from the archive for faster response times and full history (beyond Redis 30-day retention). Use the same database URL as garbo (e.g. garbo's `DATABASE_URL`).
+
 **Optional (PDF upload to object storage):**
 - `S3_BUCKET`: Bucket name used for `POST /api/queues/parsePdf/upload` (required only if you use that endpoint)
 - `S3_ENDPOINT`: S3-compatible endpoint URL (optional; set when using a non-AWS provider/custom endpoint)
