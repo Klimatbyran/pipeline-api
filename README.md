@@ -46,8 +46,8 @@ The following environment variables are available:
 - `S3_BUCKET`: Bucket name used for `POST /api/queues/parsePdf/upload` (required only if you use that endpoint)
 - `S3_ENDPOINT`: S3-compatible endpoint URL (optional; set when using a non-AWS provider/custom endpoint)
 - `S3_REGION`: AWS SDK client region (optional; defaults to `eu-north-1`)
-- `S3_PRESIGNED_EXPIRY_SECONDS`: Presigned GET URL expiry seconds (optional; default `86400`, min `60`, max `604800`)
 - `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_SESSION_TOKEN`: Optional credentials if not using workload identity/role-based auth
+- `S3_PUBLIC_BASE_URL`: Optional stable public base URL for uploaded PDFs. If set, `parsePdf/upload` will also store `publicUrl` on the job data (used by the frontend for long-lived links). Example: `https://storage.googleapis.com/<bucket>`
 
 Create a `.env` file in the root directory with these variables.
 
@@ -57,7 +57,7 @@ If you need to upload PDF files directly (instead of passing URLs), use:
 
 - `POST /api/queues/parsePdf/upload` (`multipart/form-data`)
 
-This endpoint uploads PDFs to object storage and enqueues `parsePdf` jobs using a presigned GET URL. It requires `S3_BUCKET` (and optionally other `S3_*` env vars listed above).
+This endpoint uploads PDFs to object storage and enqueues `parsePdf` jobs using a stable public URL. It requires `S3_BUCKET` and `S3_PUBLIC_BASE_URL` (and optionally other `S3_*` env vars listed above).
 
 ### Installation
 

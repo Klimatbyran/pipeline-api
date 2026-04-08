@@ -7,7 +7,7 @@ import { STATUS, QUEUE_NAMES } from "../lib/bullmq";
 import { JobType } from "bullmq";
 import { addQueueJobBodySchema, readQueueJobPathParamsSchema, readQueuePathParamsSchema, readQueueQueryStringSchema, readQueueStatsQueryStringSchema, rerunAndSaveQueueJobBodySchema, rerunJobsByWorkerBodySchema, rerunQueueJobBodySchema } from "../schemas/request";
 import { z } from "zod";
-import { uploadPdfAndGetUrl } from "../services/S3UploadService";
+import { uploadPdfAndGetUrls } from "../services/S3UploadService";
 import { isS3Configured } from "../config/s3";
 
 async function uploadAndEnqueueParsePdfJobs(params: {
@@ -28,9 +28,9 @@ async function uploadAndEnqueueParsePdfJobs(params: {
 
   const addedJobs: BaseJob[] = [];
   for (const { buffer, filename } of files) {
-    let url: string;
+    let publicUrl: string;
     try {
-      url = await uploadPdfAndGetUrl(buffer, filename);
+      ({ publicUrl } = await uploadPdfAndGetUrls(buffer, filename));
     } catch (err: any) {
       request.log.warn({ err, filename }, 'S3 upload failed');
       const isTooLarge = err?.message?.includes('too large') ?? false;
@@ -41,15 +41,19 @@ async function uploadAndEnqueueParsePdfJobs(params: {
       };
     }
 
-    request.log.info({ filename, url }, 'S3 upload succeeded, adding to BullMQ');
+    request.log.info(
+      { filename, url: publicUrl },
+      'S3 upload succeeded, adding to BullMQ'
+    );
     const perUrlThreadId = randomUUID();
-    const addedJob = await queueService.addJob(QUEUE_NAMES.PARSE_PDF, url, options.autoApprove ?? false, {
+    const addedJob = await queueService.addJob(QUEUE_NAMES.PARSE_PDF, publicUrl, options.autoApprove ?? false, {
       forceReindex: options.forceReindex,
       threadId: perUrlThreadId,
       replaceAllEmissions: options.replaceAllEmissions,
       runOnly: options.runOnly,
       batchId: options.batchId,
       tags: options.tags,
+      extraData: { publicUrl },
     });
     request.log.info({ filename, jobId: addedJob.id }, 'BullMQ job added successfully');
     addedJobs.push(addedJob);
