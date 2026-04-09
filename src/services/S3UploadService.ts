@@ -67,13 +67,17 @@ export async function uploadPdfAndGetUrls(
   let publicUrl: string | undefined;
   if (publicBase) {
     publicUrl = `${publicBase.replace(/\/$/, '')}/${key}`;
-  } else if (endpoint && endpoint.includes('storage.googleapis.com')) {
-    publicUrl = `https://storage.googleapis.com/${bucket}/${key}`;
+  } else if (endpoint) {
+    // Common cases:
+    // - GCS XML endpoint:   https://storage.googleapis.com   -> https://storage.googleapis.com/<bucket>/<key>
+    // - Other S3 endpoints: https://s3.example.com           -> https://s3.example.com/<bucket>/<key> (if publicly routable)
+    const base = endpoint.replace(/\/$/, '');
+    publicUrl = `${base}/${bucket}/${key}`;
   }
 
   if (!publicUrl) {
     throw new Error(
-      'Public URL is not configured. Set S3_PUBLIC_BASE_URL (e.g. https://storage.googleapis.com/<bucket>) so uploaded PDFs can be accessed later.'
+      'Public URL is not configured. Set S3_PUBLIC_BASE_URL (e.g. https://storage.googleapis.com/<bucket>) or S3_ENDPOINT (e.g. https://storage.googleapis.com) so uploaded PDFs can be accessed later.'
     );
   }
 
