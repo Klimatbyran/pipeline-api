@@ -7,8 +7,32 @@ import { STATUS, QUEUE_NAMES } from "../lib/bullmq";
 import { JobType } from "bullmq";
 import { addQueueJobBodySchema, readQueueJobPathParamsSchema, readQueuePathParamsSchema, readQueueQueryStringSchema, readQueueStatsQueryStringSchema, rerunAndSaveQueueJobBodySchema, rerunJobsByWorkerBodySchema, rerunQueueJobBodySchema } from "../schemas/request";
 import { z } from "zod";
-import { uploadPdfAndGetUrls } from "../services/S3UploadService";
+import { type PdfUploadResult, uploadPdfAndGetUrls } from "../services/S3UploadService";
 import { isS3Configured } from "../config/s3";
+import { cachePdfFromUrl, type PdfCacheEntry } from "../services/PdfCacheService";
+
+const pdfUploadMetaSchema = z.object({
+  filename: z.string(),
+  publicUrl: z.string().url(),
+  bucket: z.string(),
+  key: z.string(),
+  sha256: z.string(),
+  reusedExisting: z.boolean(),
+  uploaded: z.boolean(),
+});
+
+const pdfCacheEntrySchema = z.object({
+  env: z.string(),
+  sourceUrl: z.string().url(),
+  sha256: z.string(),
+  bucket: z.string(),
+  key: z.string(),
+  publicUrl: z.string().url(),
+  reusedExisting: z.boolean(),
+  uploaded: z.boolean(),
+  fetchedAt: z.string(),
+  contentLength: z.number().optional(),
+});
 
 async function uploadAndEnqueueParsePdfJobs(params: {
   queueService: QueueService;
@@ -23,14 +47,18 @@ async function uploadAndEnqueueParsePdfJobs(params: {
   };
   request: FastifyRequest;
   fileTooLargeMessage: string;
-}): Promise<{ ok: true; jobs: BaseJob[] } | { ok: false; status: 413 | 500; error: string }> {
+}): Promise<
+  | { ok: true; jobs: BaseJob[]; uploads: Array<{ filename: string } & PdfUploadResult> }
+  | { ok: false; status: 413 | 500; error: string }
+> {
   const { queueService, files, options, request, fileTooLargeMessage } = params;
 
   const addedJobs: BaseJob[] = [];
+  const uploads: Array<{ filename: string } & PdfUploadResult> = [];
   for (const { buffer, filename } of files) {
-    let publicUrl: string;
+    let upload: PdfUploadResult;
     try {
-      ({ publicUrl } = await uploadPdfAndGetUrls(buffer, filename));
+      upload = await uploadPdfAndGetUrls(buffer, filename);
     } catch (err: any) {
       request.log.warn({ err, filename }, 'S3 upload failed');
       const isTooLarge = err?.message?.includes('too large') ?? false;
@@ -42,23 +70,35 @@ async function uploadAndEnqueueParsePdfJobs(params: {
     }
 
     request.log.info(
-      { filename, url: publicUrl },
+      { filename, url: upload.publicUrl, reusedExisting: upload.reusedExisting, uploaded: upload.uploaded },
       'S3 upload succeeded, adding to BullMQ'
     );
+    uploads.push({ filename, ...upload });
     const perUrlThreadId = randomUUID();
-    const addedJob = await queueService.addJob(QUEUE_NAMES.PARSE_PDF, publicUrl, options.autoApprove ?? false, {
+    const addedJob = await queueService.addJob(QUEUE_NAMES.PARSE_PDF, upload.publicUrl, options.autoApprove ?? false, {
       forceReindex: options.forceReindex,
       threadId: perUrlThreadId,
       replaceAllEmissions: options.replaceAllEmissions,
       runOnly: options.runOnly,
       batchId: options.batchId,
       tags: options.tags,
+      data: {
+        sourceUrl: `uploaded:${filename}`,
+        pdfCache: {
+          sha256: upload.sha256,
+          bucket: upload.bucket,
+          key: upload.key,
+          publicUrl: upload.publicUrl,
+          reusedExisting: upload.reusedExisting,
+          uploaded: upload.uploaded,
+        },
+      },
     });
     request.log.info({ filename, jobId: addedJob.id }, 'BullMQ job added successfully');
     addedJobs.push(addedJob);
   }
 
-  return { ok: true, jobs: addedJobs };
+  return { ok: true, jobs: addedJobs, uploads };
 }
 
 async function parseParsePdfUpload(request: FastifyRequest): Promise<{
@@ -197,7 +237,10 @@ export async function readQueuesRoute(app: FastifyInstance) {
         tags: ['Queues'],
         consumes: ['multipart/form-data'],
         response: {
-          200: queueAddJobResponseSchema,
+          200: z.object({
+            jobs: queueAddJobResponseSchema,
+            uploads: z.array(pdfUploadMetaSchema),
+          }),
           400: z.object({ error: z.string() }),
           413: z.object({ error: z.string() }),
           500: z.object({ error: z.string() }),
@@ -255,7 +298,10 @@ export async function readQueuesRoute(app: FastifyInstance) {
         },
         'ParsePdf upload request completed'
       );
-      return reply.send(uploadResult.jobs);
+      return reply.send({
+        jobs: uploadResult.jobs,
+        uploads: uploadResult.uploads,
+      });
     }
   );
 
@@ -264,12 +310,18 @@ export async function readQueuesRoute(app: FastifyInstance) {
     {
       schema: {
         summary: 'Add job to a queue',
-        description: 'Enqueue one or more URLs into the specified queue. Optional flags include autoApprove, replaceAllEmissions and forceReindex (alias: force-reindex).',
+        description: 'Enqueue one or more URLs into the specified queue. Optional flags include autoApprove, replaceAllEmissions and forceReindex (alias: force-reindex). For parsePdf only: set cachePdf=true to cache PDFs to S3 before enqueueing so workers read from storage.',
         tags: ['Queues'],
         params: readQueuePathParamsSchema,
         body: addQueueJobBodySchema,
         response: {
-          200: queueAddJobResponseSchema
+          200: z.union([
+            queueAddJobResponseSchema,
+            z.object({
+              jobs: queueAddJobResponseSchema,
+              cached: z.array(pdfCacheEntrySchema),
+            }),
+          ])
         },
       },
     },
@@ -285,7 +337,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
       if (!resolvedName) {
         return reply.status(400).send({ error: `Unknown queue '${name}'. Valid queues: ${Object.values(QUEUE_NAMES).join(', ')}` });
       }
-      const { urls, autoApprove, forceReindex, replaceAllEmissions, runOnly, batchId, tags } = request.body as any;
+      const { urls, autoApprove, forceReindex, replaceAllEmissions, runOnly, batchId, tags, cachePdf } = request.body as any;
       // Log enqueue request (sanitized)
       app.log.info(
         {
@@ -297,18 +349,53 @@ export async function readQueuesRoute(app: FastifyInstance) {
           runOnly: runOnly,
           batchId: batchId ?? undefined,
           tags: tags ?? undefined,
+          cachePdf: !!cachePdf,
         },
         'Enqueue request received'
       );
       const queueService = await QueueService.getQueueService();
       const addedJobs: BaseJob[] = [];
+      const cached: PdfCacheEntry[] = [];
       for(const url of urls) {
+        if (resolvedName === QUEUE_NAMES.PARSE_PDF && cachePdf) {
+          if (!isS3Configured()) {
+            return reply.status(503).send({
+              error: 'PDF caching is not configured. Set S3_BUCKET in the environment.',
+            });
+          }
+          const entry = await cachePdfFromUrl(url);
+          cached.push(entry);
+          // Enqueue with cached URL so workers read from storage, but keep the official link for UI/history.
+          const perUrlThreadId = randomUUID();
+          const addedJob = await queueService.addJob(resolvedName, entry.publicUrl, autoApprove, {
+            forceReindex,
+            threadId: perUrlThreadId,
+            replaceAllEmissions,
+            runOnly,
+            batchId,
+            tags,
+            data: {
+              sourceUrl: url,
+              pdfCache: {
+                sha256: entry.sha256,
+                bucket: entry.bucket,
+                key: entry.key,
+                publicUrl: entry.publicUrl,
+                reusedExisting: entry.reusedExisting,
+                uploaded: entry.uploaded,
+                fetchedAt: entry.fetchedAt,
+              },
+            },
+          });
+          addedJobs.push(addedJob);
+          continue;
+        }
         // Generate a unique threadId for each URL; client-provided threadId is ignored
         const perUrlThreadId = randomUUID();
         const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: perUrlThreadId, replaceAllEmissions, runOnly, batchId, tags });
         addedJobs.push(addedJob);
       }
-      return reply.send(addedJobs);
+      return reply.send(cached.length > 0 ? { jobs: addedJobs, cached } : addedJobs);
     }
   );
 

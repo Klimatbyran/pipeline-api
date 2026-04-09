@@ -57,9 +57,29 @@ If you need to upload PDF files directly (instead of passing URLs), use:
 
 - `POST /api/queues/parsePdf/upload` (`multipart/form-data`)
 
-This endpoint uploads PDFs to object storage and enqueues `parsePdf` jobs using a stable public URL. It requires `S3_BUCKET` and either:
+This endpoint uploads PDFs to object storage and enqueues `parsePdf` jobs using a stable public URL. PDFs are stored using **content-hash keys** to avoid duplicates:
+
+- Key format: `uploads/{env}/{sha256}.pdf` where `{env}` is `UPLOADS_ENV` (or derived from `NODE_ENV`)
+- Key format: `uploads/{env}/{sha256}.pdf` where `{env}` is derived from `NODE_ENV`:
+  - `production` → `prod`
+  - `staging` → `stage`
+  - otherwise → `dev`
+- Uploading the exact same PDF bytes twice reuses the same object key and returns the existing URL.
+
+It requires `S3_BUCKET` and either:
 - `S3_PUBLIC_BASE_URL`, or
 - `S3_ENDPOINT` (publicly routable; URL constructed as `${S3_ENDPOINT}/${S3_BUCKET}/${key}`).
+
+### PDF Caching for URL-based jobs (optional)
+
+When adding jobs via `POST /api/queues/parsePdf`, you can set `cachePdf=true` to:
+
+- Fetch each provided URL server-side
+- Store the PDF to object storage at `uploads/{env}/{sha256}.pdf`
+- Enqueue the job using the stored URL (so workers read from storage)
+- Preserve the original URL in job data as `sourceUrl` (for UI/history)
+
+The response will include a `cached[]` array with per-URL cache details when caching is enabled.
 
 ### Installation
 
