@@ -6,16 +6,11 @@
 export function getS3Config(): {
   bucket: string;
   region: string;
-  presignedExpirySeconds: number;
 } {
   const bucket = process.env.S3_BUCKET;
   // Many S3-compatible providers ignore region, but the AWS SDK still requires one.
   // Default matches our current AWS region convention.
   const region = process.env.S3_REGION ?? 'eu-north-1';
-  const presignedExpirySeconds = Math.min(
-    Math.max(parseInt(process.env.S3_PRESIGNED_EXPIRY_SECONDS ?? '86400', 10) || 86400, 60),
-    604800
-  ); // 1 min to 7 days, default 24h
 
   if (!bucket?.trim()) {
     throw new Error(
@@ -23,7 +18,7 @@ export function getS3Config(): {
     );
   }
 
-  return { bucket: bucket.trim(), region, presignedExpirySeconds };
+  return { bucket: bucket.trim(), region };
 }
 
 export function isS3Configured(): boolean {

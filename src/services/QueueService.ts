@@ -118,7 +118,19 @@ export class QueueService {
         return jobs;
     }
 
-    public async addJob(queueName: string, url: string, autoApprove: boolean = false, options?: { forceReindex?: boolean; threadId?: string; replaceAllEmissions?: boolean; runOnly?: string[]; batchId?: string; tags?: string[] }): Promise<BaseJob> {
+    public async addJob(
+        queueName: string,
+        url: string,
+        autoApprove: boolean = false,
+        options?: {
+            forceReindex?: boolean;
+            threadId?: string;
+            replaceAllEmissions?: boolean;
+            runOnly?: string[];
+            batchId?: string;
+            tags?: string[];
+        }
+    ): Promise<BaseJob> {
         const queue = await this.getQueue(queueName);
         const id = crypto.randomUUID();
         const job = await queue.add('download ' + url.slice(-20), {
