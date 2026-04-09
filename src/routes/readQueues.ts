@@ -53,7 +53,6 @@ async function uploadAndEnqueueParsePdfJobs(params: {
       runOnly: options.runOnly,
       batchId: options.batchId,
       tags: options.tags,
-      extraData: { publicUrl },
     });
     request.log.info({ filename, jobId: addedJob.id }, 'BullMQ job added successfully');
     addedJobs.push(addedJob);

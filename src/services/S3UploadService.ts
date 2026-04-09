@@ -68,9 +68,6 @@ export async function uploadPdfAndGetUrls(
   if (publicBase) {
     publicUrl = `${publicBase.replace(/\/$/, '')}/${key}`;
   } else if (endpoint) {
-    // Common cases:
-    // - GCS XML endpoint:   https://storage.googleapis.com   -> https://storage.googleapis.com/<bucket>/<key>
-    // - Other S3 endpoints: https://s3.example.com           -> https://s3.example.com/<bucket>/<key> (if publicly routable)
     const base = endpoint.replace(/\/$/, '');
     publicUrl = `${base}/${bucket}/${key}`;
   }

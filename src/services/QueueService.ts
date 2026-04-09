@@ -129,7 +129,6 @@ export class QueueService {
             runOnly?: string[];
             batchId?: string;
             tags?: string[];
-            extraData?: Record<string, any>;
         }
     ): Promise<BaseJob> {
         const queue = await this.getQueue(queueName);
@@ -144,7 +143,6 @@ export class QueueService {
             ...(options?.runOnly ? { runOnly: options.runOnly } : {}),
             ...(options?.batchId ? { batchId: options.batchId } : {}),
             ...(options?.tags?.length ? { tags: options.tags } : {}),
-            ...(options?.extraData ? options.extraData : {}),
         });
         return transformJobtoBaseJob(job);
     }
