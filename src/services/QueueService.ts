@@ -136,16 +136,16 @@ export class QueueService {
         const queue = await this.getQueue(queueName);
         const id = crypto.randomUUID();
         const job = await queue.add('download ' + url.slice(-20), {
-            url: url.trim(),
-            autoApprove,
-            id,
+            ...(options?.data ? options.data : {}),
             ...(options?.threadId ? { threadId: options.threadId } : {}),
             ...(options?.forceReindex !== undefined ? { forceReindex: options.forceReindex } : {}),
             ...(options?.replaceAllEmissions !== undefined ? { replaceAllEmissions: options.replaceAllEmissions } : {}),
             ...(options?.runOnly ? { runOnly: options.runOnly } : {}),
             ...(options?.batchId ? { batchId: options.batchId } : {}),
             ...(options?.tags?.length ? { tags: options.tags } : {}),
-            ...(options?.data ? options.data : {}),
+            autoApprove,
+            id,
+            url: url.trim(),
         });
         return transformJobtoBaseJob(job);
     }

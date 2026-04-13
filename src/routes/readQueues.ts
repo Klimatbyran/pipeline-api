@@ -34,6 +34,11 @@ const pdfCacheEntrySchema = z.object({
   contentLength: z.number().optional(),
 });
 
+const pdfCacheUrlErrorSchema = z.object({
+  url: z.string(),
+  error: z.string(),
+});
+
 async function uploadAndEnqueueParsePdfJobs(params: {
   queueService: QueueService;
   files: { buffer: Buffer; filename: string }[];
@@ -320,8 +325,13 @@ export async function readQueuesRoute(app: FastifyInstance) {
             z.object({
               jobs: queueAddJobResponseSchema,
               cached: z.array(pdfCacheEntrySchema),
+              errors: z.array(pdfCacheUrlErrorSchema).optional(),
             }),
-          ])
+          ]),
+          400: z.object({
+            error: z.string(),
+            errors: z.array(pdfCacheUrlErrorSchema).optional(),
+          }),
         },
       },
     },
@@ -356,46 +366,69 @@ export async function readQueuesRoute(app: FastifyInstance) {
       const queueService = await QueueService.getQueueService();
       const addedJobs: BaseJob[] = [];
       const cached: PdfCacheEntry[] = [];
-      for(const url of urls) {
+      const cacheErrors: Array<{ url: string; error: string }> = [];
+
+      for (const url of urls) {
         if (resolvedName === QUEUE_NAMES.PARSE_PDF && cachePdf) {
           if (!isS3Configured()) {
             return reply.status(503).send({
               error: 'PDF caching is not configured. Set S3_BUCKET in the environment.',
             });
           }
-          const entry = await cachePdfFromUrl(url);
-          cached.push(entry);
-          // Enqueue with cached URL so workers read from storage, but keep the official link for UI/history.
-          const perUrlThreadId = randomUUID();
-          const addedJob = await queueService.addJob(resolvedName, entry.publicUrl, autoApprove, {
-            forceReindex,
-            threadId: perUrlThreadId,
-            replaceAllEmissions,
-            runOnly,
-            batchId,
-            tags,
-            data: {
-              sourceUrl: url,
-              pdfCache: {
-                sha256: entry.sha256,
-                bucket: entry.bucket,
-                key: entry.key,
-                publicUrl: entry.publicUrl,
-                reusedExisting: entry.reusedExisting,
-                uploaded: entry.uploaded,
-                fetchedAt: entry.fetchedAt,
+          try {
+            const entry = await cachePdfFromUrl(url);
+            const perUrlThreadId = randomUUID();
+            const addedJob = await queueService.addJob(resolvedName, entry.publicUrl, autoApprove, {
+              forceReindex,
+              threadId: perUrlThreadId,
+              replaceAllEmissions,
+              runOnly,
+              batchId,
+              tags,
+              data: {
+                sourceUrl: url,
+                pdfCache: {
+                  sha256: entry.sha256,
+                  bucket: entry.bucket,
+                  key: entry.key,
+                  publicUrl: entry.publicUrl,
+                  reusedExisting: entry.reusedExisting,
+                  uploaded: entry.uploaded,
+                  fetchedAt: entry.fetchedAt,
+                },
               },
-            },
-          });
-          addedJobs.push(addedJob);
+            });
+            addedJobs.push(addedJob);
+            cached.push(entry);
+          } catch (err: any) {
+            const message = err?.message ? String(err.message) : 'Failed to cache or enqueue PDF';
+            request.log.warn({ err, url }, 'parsePdf cachePdf failed for URL');
+            cacheErrors.push({ url, error: message });
+          }
           continue;
         }
-        // Generate a unique threadId for each URL; client-provided threadId is ignored
         const perUrlThreadId = randomUUID();
         const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: perUrlThreadId, replaceAllEmissions, runOnly, batchId, tags });
         addedJobs.push(addedJob);
       }
-      return reply.send(cached.length > 0 ? { jobs: addedJobs, cached } : addedJobs);
+
+      if (resolvedName === QUEUE_NAMES.PARSE_PDF && cachePdf) {
+        if (cacheErrors.length > 0 && addedJobs.length === 0) {
+          return reply.status(400).send({
+            error: 'Could not cache or enqueue any PDFs from the provided URLs.',
+            errors: cacheErrors,
+          });
+        }
+        if (cached.length > 0 || cacheErrors.length > 0) {
+          return reply.send({
+            jobs: addedJobs,
+            cached,
+            ...(cacheErrors.length > 0 ? { errors: cacheErrors } : {}),
+          });
+        }
+      }
+
+      return reply.send(addedJobs);
     }
   );
 

@@ -2,6 +2,15 @@
 
 This API supports **full caching** of PDFs into object storage so the pipeline can operate on stable URLs, even when source links change or become unavailable.
 
+## Authentication
+
+Queue **write** operations (`POST` / `PUT` / `PATCH` / `DELETE` under `/api/queues`, `/api/processes`, `/api/pipeline`) require a valid **JWT** in the `Authorization: Bearer …` header whenever `NODE_ENV` is not `development` (see `src/app.ts`). That includes:
+
+- `POST /api/queues/parsePdf/upload`
+- `POST /api/queues/parsePdf` (including `cachePdf: true`)
+
+`cachePdf` performs **server-side HTTP fetches** from user-supplied URLs. JWT limits anonymous abuse, but you should still treat callers as **trusted** for outbound network policy, or extend URL validation (this codebase blocks private/reserved IPs, credentials in URLs, and non-http(s) schemes—see `src/lib/outbound-pdf-url.ts`).
+
 ## Storage layout
 
 - **Key format**: `uploads/{env}/{sha256}.pdf`
@@ -14,7 +23,7 @@ This API supports **full caching** of PDFs into object storage so the pipeline c
 ## Dedupe behavior
 
 - If two PDFs are **byte-identical**, they will produce the same SHA-256 and therefore the same object key.
-  - The API will **reuse** the existing object and return the existing URL.
+  - The API will **reuse** the existing object and return its URL.
 - If two PDFs are “similar” but not identical (e.g. different year, changed numbers, regenerated PDF metadata), they will produce different hashes and will be stored separately.
 
 In practice, SHA-256 collisions are considered negligible for this use case.
@@ -34,15 +43,15 @@ In practice, SHA-256 collisions are considered negligible for this use case.
 
 `POST /api/queues/parsePdf` with JSON body including `cachePdf=true`
 
-- Fetches each URL server-side, caches the PDF to S3, and enqueues the job using the cached S3 URL.
+- Fetches each URL server-side (with redirect cap, overall timeout, PDF magic-byte check, and basic SSRF guards), caches the PDF to S3, and enqueues the job using the cached S3 URL.
 - The original URL is preserved in job data as `sourceUrl`.
+- **Partial success**: if some URLs fail and others succeed, the response is **200** with `jobs`, `cached`, and an `errors` array `{ url, error }[]`. If **every** URL fails, the API returns **400** with `error` and `errors`.
 
 ## Redis mapping (“URL table”)
 
 When caching from URLs, the API stores a mapping in Redis so repeated submissions can skip refetching:
 
 - **URL → cache entry**: `pdf:urlmap:{env}:{sha1(sourceUrl)}`
-- **SHA → cache entry**: `pdf:shamap:{env}:{sha256}`
 
 The stored value is a JSON blob containing:
 `{ env, sourceUrl, sha256, bucket, key, publicUrl, reusedExisting, uploaded, fetchedAt, contentLength? }`
@@ -64,4 +73,3 @@ These Redis keys are stored with a **14-day TTL**. After expiry, the next reques
 
 - Consider S3 lifecycle rules for `uploads/dev/*` and/or `uploads/stage/*` to avoid long-term accumulation during testing.
 - Cached PDFs are full copies stored in your bucket.
-

@@ -59,7 +59,6 @@ If you need to upload PDF files directly (instead of passing URLs), use:
 
 This endpoint uploads PDFs to object storage and enqueues `parsePdf` jobs using a stable public URL. PDFs are stored using **content-hash keys** to avoid duplicates:
 
-- Key format: `uploads/{env}/{sha256}.pdf` where `{env}` is `UPLOADS_ENV` (or derived from `NODE_ENV`)
 - Key format: `uploads/{env}/{sha256}.pdf` where `{env}` is derived from `NODE_ENV`:
   - `production` → `prod`
   - `staging` → `stage`
@@ -74,12 +73,12 @@ It requires `S3_BUCKET` and either:
 
 When adding jobs via `POST /api/queues/parsePdf`, you can set `cachePdf=true` to:
 
-- Fetch each provided URL server-side
+- Fetch each provided URL server-side (overall timeout, capped redirects, `%PDF` header check, and basic blocking of private/reserved destinations—see `src/lib/outbound-pdf-url.ts`)
 - Store the PDF to object storage at `uploads/{env}/{sha256}.pdf`
 - Enqueue the job using the stored URL (so workers read from storage)
 - Preserve the original URL in job data as `sourceUrl` (for UI/history)
 
-The response will include a `cached[]` array with per-URL cache details when caching is enabled.
+The response includes `cached[]` when caching ran. If some URLs fail, you may get `errors[]` alongside successful `jobs` (HTTP 400 if every URL fails). Details: `docs/pdf-caching.md`.
 
 ### Installation
 

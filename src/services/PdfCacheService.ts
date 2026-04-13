@@ -1,6 +1,12 @@
 import { createHash } from "crypto";
 import { PDF_MAX_BYTES, uploadPdfAndGetUrls, type PdfUploadResult } from "./S3UploadService";
 import { getRedisClient } from "../lib/redis-client";
+import {
+  assertBufferLooksLikePdf,
+  assertUrlSafeForServerFetch,
+  PDF_FETCH_MAX_REDIRECTS,
+  PDF_FETCH_TIMEOUT_MS,
+} from "../lib/outbound-pdf-url";
 
 export type PdfCacheEntry = {
   env: string;
@@ -27,54 +33,72 @@ function sha1Hex(input: string): string {
 }
 
 async function fetchPdfToBuffer(url: string, maxBytes: number): Promise<{ buffer: Buffer; contentLength?: number }> {
-  const res = await fetch(url, {
-    redirect: "follow",
-    headers: {
-      // Some servers behave better with an explicit accept.
-      Accept: "application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
-    },
-  });
+  let currentUrl = url;
+  const signal = AbortSignal.timeout(PDF_FETCH_TIMEOUT_MS);
 
-  if (!res.ok) {
-    throw new Error(`Failed to fetch PDF (${res.status})`);
-  }
+  for (let redirect = 0; redirect <= PDF_FETCH_MAX_REDIRECTS; redirect++) {
+    await assertUrlSafeForServerFetch(currentUrl);
 
-  const contentLengthHeader = res.headers.get("content-length");
-  const contentLength = contentLengthHeader ? Number(contentLengthHeader) : undefined;
-  if (typeof contentLength === "number" && Number.isFinite(contentLength) && contentLength > maxBytes) {
-    throw new Error(`PDF too large (max ${maxBytes / 1024 / 1024} MB)`);
-  }
+    const res = await fetch(currentUrl, {
+      redirect: "manual",
+      signal,
+      headers: {
+        Accept: "application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
+      },
+    });
 
-  if (!res.body) {
-    // Node fetch should always have a body for OK responses, but be defensive.
-    const arr = new Uint8Array(await res.arrayBuffer());
-    if (arr.byteLength > maxBytes) throw new Error(`PDF too large (max ${maxBytes / 1024 / 1024} MB)`);
-    return { buffer: Buffer.from(arr), contentLength: arr.byteLength };
-  }
+    if (res.status >= 300 && res.status < 400) {
+      if (res.body) {
+        await res.body.cancel().catch(() => undefined);
+      }
+      const loc = res.headers.get("location");
+      if (!loc) {
+        throw new Error(`Redirect ${res.status} without Location header`);
+      }
+      currentUrl = new URL(loc, currentUrl).href;
+      continue;
+    }
 
-  const chunks: Buffer[] = [];
-  let total = 0;
+    if (!res.ok) {
+      throw new Error(`Failed to fetch PDF (${res.status})`);
+    }
 
-  // Node 18+ uses a web ReadableStream; it supports async iteration.
-  for await (const chunk of res.body as any) {
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    total += buf.length;
-    if (total > maxBytes) {
+    const contentLengthHeader = res.headers.get("content-length");
+    const contentLength = contentLengthHeader ? Number(contentLengthHeader) : undefined;
+    if (typeof contentLength === "number" && Number.isFinite(contentLength) && contentLength > maxBytes) {
       throw new Error(`PDF too large (max ${maxBytes / 1024 / 1024} MB)`);
     }
-    chunks.push(buf);
+
+    if (!res.body) {
+      const arr = new Uint8Array(await res.arrayBuffer());
+      if (arr.byteLength > maxBytes) throw new Error(`PDF too large (max ${maxBytes / 1024 / 1024} MB)`);
+      const buffer = Buffer.from(arr);
+      assertBufferLooksLikePdf(buffer);
+      return { buffer, contentLength: arr.byteLength };
+    }
+
+    const chunks: Buffer[] = [];
+    let total = 0;
+
+    for await (const chunk of res.body as AsyncIterable<Uint8Array | Buffer>) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += buf.length;
+      if (total > maxBytes) {
+        throw new Error(`PDF too large (max ${maxBytes / 1024 / 1024} MB)`);
+      }
+      chunks.push(buf);
+    }
+
+    const buffer = Buffer.concat(chunks, total);
+    assertBufferLooksLikePdf(buffer);
+    return { buffer, contentLength: contentLength ?? total };
   }
 
-  return { buffer: Buffer.concat(chunks, total), contentLength: contentLength ?? total };
+  throw new Error(`Too many redirects (max ${PDF_FETCH_MAX_REDIRECTS})`);
 }
 
 function buildUrlMapKey(env: string, sourceUrl: string): string {
-  // Keep Redis keys short and safe; store the raw URL in the value.
   return `pdf:urlmap:${env}:${sha1Hex(sourceUrl)}`;
-}
-
-function buildShaMapKey(env: string, sha256: string): string {
-  return `pdf:shamap:${env}:${sha256}`;
 }
 
 export async function cachePdfFromUrl(sourceUrl: string): Promise<PdfCacheEntry> {
@@ -83,14 +107,13 @@ export async function cachePdfFromUrl(sourceUrl: string): Promise<PdfCacheEntry>
   const urlKey = buildUrlMapKey(env, sourceUrl);
   const TTL_SECONDS = 14 * 24 * 60 * 60; // 14 days
 
-  // Fast path: if we already cached this URL, reuse.
   const cachedJson = await redis.get(urlKey);
   if (cachedJson) {
     try {
       const parsed = JSON.parse(cachedJson) as PdfCacheEntry;
       if (parsed?.publicUrl && parsed?.key && parsed?.sha256) return parsed;
     } catch {
-      // ignore and recompute
+      /* ignore and recompute */
     }
   }
 
@@ -110,15 +133,8 @@ export async function cachePdfFromUrl(sourceUrl: string): Promise<PdfCacheEntry>
     ...(typeof contentLength === "number" ? { contentLength } : {}),
   };
 
-  // Store both mappings with a bounded TTL so Redis stays a cache (not long-term storage).
-  const shaKey = buildShaMapKey(env, upload.sha256);
   const payload = JSON.stringify(entry);
-  await redis
-    .multi()
-    .set(urlKey, payload, "EX", TTL_SECONDS)
-    .set(shaKey, payload, "EX", TTL_SECONDS)
-    .exec();
+  await redis.set(urlKey, payload, "EX", TTL_SECONDS);
 
   return entry;
 }
-
