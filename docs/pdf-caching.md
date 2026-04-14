@@ -60,7 +60,7 @@ This behaves like a lightweight “table” without requiring a SQL database in 
 
 ### Retention / TTL
 
-These Redis keys are stored with a **14-day TTL**. After expiry, the next request will refetch the PDF from the source URL and re-cache it.
+These Redis keys are stored with a 14-day TTL. After expiry, the next request will refetch the PDF from the source URL and re-cache it.
 
 ## Environment variables
 
