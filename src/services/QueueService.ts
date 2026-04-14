@@ -129,20 +129,23 @@ export class QueueService {
             runOnly?: string[];
             batchId?: string;
             tags?: string[];
+            /** Extra job data to merge in (e.g. sourceUrl, cache metadata). */
+            data?: Record<string, any>;
         }
     ): Promise<BaseJob> {
         const queue = await this.getQueue(queueName);
         const id = crypto.randomUUID();
         const job = await queue.add('download ' + url.slice(-20), {
-            url: url.trim(),
-            autoApprove,
-            id,
+            ...(options?.data ? options.data : {}),
             ...(options?.threadId ? { threadId: options.threadId } : {}),
             ...(options?.forceReindex !== undefined ? { forceReindex: options.forceReindex } : {}),
             ...(options?.replaceAllEmissions !== undefined ? { replaceAllEmissions: options.replaceAllEmissions } : {}),
             ...(options?.runOnly ? { runOnly: options.runOnly } : {}),
             ...(options?.batchId ? { batchId: options.batchId } : {}),
             ...(options?.tags?.length ? { tags: options.tags } : {}),
+            autoApprove,
+            id,
+            url: url.trim(),
         });
         return transformJobtoBaseJob(job);
     }

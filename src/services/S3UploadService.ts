@@ -1,7 +1,7 @@
-import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { S3Client } from '@aws-sdk/client-s3';
 import { getS3Config } from '../config/s3';
-import { randomUUID } from 'crypto';
+import { createHash } from 'crypto';
 
 /** Max size per PDF (e.g. annual reports with images). Kept in sync with multipart limit in app.ts. */
 export const PDF_MAX_BYTES = 400 * 1024 * 1024; // 400 MB per file
@@ -9,10 +9,21 @@ const PDF_MIME = 'application/pdf';
 
 let client: S3Client | null = null;
 
+function getTrimmedEnv(name: string): string | undefined {
+  const value = process.env[name];
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function getS3Endpoint(): string | undefined {
+  return getTrimmedEnv('S3_ENDPOINT');
+}
+
 function getClient(): S3Client {
   if (!client) {
     const { region } = getS3Config();
-    const endpoint = process.env.S3_ENDPOINT;
+    const endpoint = getS3Endpoint();
     const accessKeyId = process.env.S3_ACCESS_KEY_ID;
     const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY;
     const sessionToken = process.env.S3_SESSION_TOKEN;
@@ -34,51 +45,109 @@ function getClient(): S3Client {
   return client;
 }
 
+export type PdfUploadResult = {
+  publicUrl: string;
+  bucket: string;
+  key: string;
+  sha256: string;
+  /** True if the object already existed and we reused it. */
+  reusedExisting: boolean;
+  /** True if we performed a PutObject in this request. */
+  uploaded: boolean;
+};
+
+function getUploadEnv(): string {
+  const nodeEnv = getTrimmedEnv('NODE_ENV');
+  if (nodeEnv === 'production') return 'prod';
+  if (nodeEnv === 'staging') return 'stage';
+  return 'dev';
+}
+
+function getPublicUrlForKey(params: { bucket: string; key: string }): string {
+  const { bucket, key } = params;
+  const publicBase = getTrimmedEnv('S3_PUBLIC_BASE_URL');
+  const endpoint = getS3Endpoint();
+
+  if (publicBase) {
+    return `${publicBase.replace(/\/$/, '')}/${key}`;
+  }
+  if (endpoint) {
+    const base = endpoint.replace(/\/$/, '');
+    return `${base}/${bucket}/${key}`;
+  }
+  throw new Error(
+    'Public URL is not configured. Set S3_PUBLIC_BASE_URL (e.g. https://storage.googleapis.com/<bucket>) or S3_ENDPOINT (e.g. https://storage.googleapis.com) so uploaded PDFs can be accessed later.'
+  );
+}
+
+function sha256Hex(buffer: Buffer): string {
+  return createHash('sha256').update(buffer).digest('hex');
+}
+
+async function objectExists(params: { bucket: string; key: string }): Promise<boolean> {
+  const s3 = getClient();
+  try {
+    await s3.send(
+      new HeadObjectCommand({
+        Bucket: params.bucket,
+        Key: params.key,
+      })
+    );
+    return true;
+  } catch (err: any) {
+    // AWS SDK v3 throws for 404/NotFound; treat those as "does not exist"
+    const httpStatus = err?.$metadata?.httpStatusCode;
+    const name = err?.name;
+    if (httpStatus === 404 || name === 'NotFound' || name === 'NoSuchKey') return false;
+    throw err;
+  }
+}
+
 /**
  * Upload PDF buffer to object storage and return a stable public URL.
- * Key format: uploads/YYYY-MM-DD/{uuid}.pdf
+ * Key format: uploads/{env}/{sha256}.pdf
+ *
+ * Semantics:
+ * - If an object with the same sha256 already exists in this env, we reuse it and return its URL.
+ * - Otherwise we upload and return the new URL.
  */
 export async function uploadPdfAndGetUrls(
   buffer: Buffer,
   filename?: string
-): Promise<{ publicUrl: string; bucket: string; key: string }> {
+): Promise<PdfUploadResult> {
   if (buffer.length > PDF_MAX_BYTES) {
     throw new Error(`PDF too large (max ${PDF_MAX_BYTES / 1024 / 1024} MB)`);
   }
 
   const { bucket } = getS3Config();
-  const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  const ext = filename?.toLowerCase().endsWith('.pdf') ? '' : '.pdf';
-  const key = `uploads/${date}/${randomUUID()}${ext}`;
+  const env = getUploadEnv();
+  const sha256 = sha256Hex(buffer);
+  const key = `uploads/${env}/${sha256}.pdf`;
 
-  const s3 = getClient();
-  await s3.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: buffer,
-      ContentType: PDF_MIME,
-    })
-  );
-
-  const publicBase = process.env.S3_PUBLIC_BASE_URL?.trim();
-  const endpoint = process.env.S3_ENDPOINT?.trim();
-
-  let publicUrl: string | undefined;
-  if (publicBase) {
-    publicUrl = `${publicBase.replace(/\/$/, '')}/${key}`;
-  } else if (endpoint) {
-    const base = endpoint.replace(/\/$/, '');
-    publicUrl = `${base}/${bucket}/${key}`;
-  }
-
-  if (!publicUrl) {
-    throw new Error(
-      'Public URL is not configured. Set S3_PUBLIC_BASE_URL (e.g. https://storage.googleapis.com/<bucket>) or S3_ENDPOINT (e.g. https://storage.googleapis.com) so uploaded PDFs can be accessed later.'
+  const existed = await objectExists({ bucket, key });
+  if (!existed) {
+    const s3 = getClient();
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: buffer,
+        ContentType: PDF_MIME,
+        // Keep a small trace for humans; not used for dedupe logic.
+        Metadata: filename ? { originalFilename: filename } : undefined,
+      })
     );
   }
 
-  return { publicUrl, bucket, key };
+  const publicUrl = getPublicUrlForKey({ bucket, key });
+  return {
+    publicUrl,
+    bucket,
+    key,
+    sha256,
+    reusedExisting: existed,
+    uploaded: !existed,
+  };
 }
 
 /**
