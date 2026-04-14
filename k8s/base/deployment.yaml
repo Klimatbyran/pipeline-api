@@ -65,3 +65,8 @@ spec:
                 secretKeyRef:
                   name: s3-bucket
                   key: S3_ENDPOINT
+            - name: NODE_ENV
+              valueFrom:
+                secretKeyRef:
+                  name: env
+                  key: NODE_ENV
