@@ -1,6 +1,7 @@
 import { Job, JobType, Queue } from "bullmq";
 import startQueues, { JOB_STATUS, QUEUE_NAMES, STATUS } from "../lib/bullmq";
 import { BaseJob, CompanyProcess, DataJob, Process, QueueStatus } from "../schemas/types";
+import { isArchiveConfigured, getDataJobsFromArchive } from "./ArchiveService";
 
 /**
  * Deep merge two objects, recursively merging nested objects
@@ -95,8 +96,47 @@ export class QueueService {
         if(!queueNames  || queueNames.length === 0) {
             queueNames = Object.values(QUEUE_NAMES);
         }
+        const useArchive = isArchiveConfigured();
+        const onlyCompletedOrFailed = status === 'completed' || status === 'failed';
+
+        if (useArchive && onlyCompletedOrFailed) {
+            try {
+                return await getDataJobsFromArchive({
+                    queueNames,
+                    processId,
+                    batchId,
+                });
+            } catch (err) {
+                console.warn('[QueueService] getDataJobs: archive read failed, falling back to Redis', err);
+            }
+        }
+
+        const redisJobs = await this.getDataJobsFromRedis(queueNames, status, processId, batchId);
+
+        if (useArchive && !onlyCompletedOrFailed) {
+            try {
+                const archiveJobs = await getDataJobsFromArchive({
+                    queueNames,
+                    processId,
+                    batchId,
+                });
+                const byKey = new Map<string, DataJob>()
+                for (const j of archiveJobs) byKey.set(`${j.queue}:${j.id}`, j);
+                for (const j of redisJobs) {
+                    if (j.status !== 'completed' && j.status !== 'failed') byKey.set(`${j.queue}:${j.id}`, j);
+                }
+                return Array.from(byKey.values());
+            } catch (err) {
+                console.warn('[QueueService] getDataJobs: archive merge failed, using Redis only', err);
+            }
+        }
+
+        return redisJobs;
+    }
+
+    private async getDataJobsFromRedis(queueNames: string[], status?: string, processId?: string, batchId?: string): Promise<DataJob[]> {
         const queryStatus = status ? [status] : JOB_STATUS;
-        const jobs: BaseJob[] = [];
+        const jobs: DataJob[] = [];
         for(const queueName of queueNames) {
              const queue = await this.getQueue(queueName);
             const rawJobs = await queue.getJobs(queryStatus as JobType[]);
@@ -107,8 +147,8 @@ export class QueueService {
             });
             const transformedJobs = await Promise.all(
                 filteredRawJobs.map(async job => {
-                    const dataJob: DataJob = await transformJobtoBaseJob(job);                    
-                    dataJob.data = job.data;        
+                    const dataJob: DataJob = await transformJobtoBaseJob(job);
+                    dataJob.data = job.data;
                     dataJob.returnvalue = job.returnvalue;
                     return dataJob;
                 })
@@ -135,13 +175,16 @@ export class QueueService {
     ): Promise<BaseJob> {
         const queue = await this.getQueue(queueName);
         const id = crypto.randomUUID();
+        // Use provided batchId or generate one so every run has a label for JobRunArchive (long-term comparison).
+        // Callers adding multiple jobs in one request should pass one batchId so all jobs share it.
+        const batchId = options?.batchId ?? crypto.randomUUID();
         const job = await queue.add('download ' + url.slice(-20), {
             ...(options?.data ? options.data : {}),
             ...(options?.threadId ? { threadId: options.threadId } : {}),
             ...(options?.forceReindex !== undefined ? { forceReindex: options.forceReindex } : {}),
             ...(options?.replaceAllEmissions !== undefined ? { replaceAllEmissions: options.replaceAllEmissions } : {}),
             ...(options?.runOnly ? { runOnly: options.runOnly } : {}),
-            ...(options?.batchId ? { batchId: options.batchId } : {}),
+            batchId,
             ...(options?.tags?.length ? { tags: options.tags } : {}),
             autoApprove,
             id,

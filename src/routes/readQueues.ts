@@ -58,6 +58,8 @@ async function uploadAndEnqueueParsePdfJobs(params: {
 > {
   const { queueService, files, options, request, fileTooLargeMessage } = params;
 
+  // One batchId per upload so all jobs in this request share it (for JobRunArchive / comparison).
+  const requestBatchId = options.batchId ?? randomUUID();
   const addedJobs: BaseJob[] = [];
   const uploads: Array<{ filename: string } & PdfUploadResult> = [];
   for (const { buffer, filename } of files) {
@@ -85,7 +87,7 @@ async function uploadAndEnqueueParsePdfJobs(params: {
       threadId: perUrlThreadId,
       replaceAllEmissions: options.replaceAllEmissions,
       runOnly: options.runOnly,
-      batchId: options.batchId,
+      batchId: requestBatchId,
       tags: options.tags,
       data: {
         sourceUrl: `uploaded:${filename}`,
@@ -364,6 +366,8 @@ export async function readQueuesRoute(app: FastifyInstance) {
         'Enqueue request received'
       );
       const queueService = await QueueService.getQueueService();
+      // One batchId per request so all jobs in this run share it (for JobRunArchive / comparison).
+      const requestBatchId = batchId ?? randomUUID();
       const addedJobs: BaseJob[] = [];
       const cached: PdfCacheEntry[] = [];
       const cacheErrors: Array<{ url: string; error: string }> = [];
@@ -408,7 +412,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
           continue;
         }
         const perUrlThreadId = randomUUID();
-        const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: perUrlThreadId, replaceAllEmissions, runOnly, batchId, tags });
+        const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: perUrlThreadId, replaceAllEmissions, runOnly, batchId: requestBatchId, tags });
         addedJobs.push(addedJob);
       }
 
