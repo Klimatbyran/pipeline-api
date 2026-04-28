@@ -347,7 +347,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
       if (!resolvedName) {
         return reply.status(400).send({ error: `Unknown queue '${name}'. Valid queues: ${Object.values(QUEUE_NAMES).join(', ')}` });
       }
-      const { urls, autoApprove, forceReindex, replaceAllEmissions, runOnly, batchId, tags, cachePdf, callbackUrl } = request.body as any;
+      const { urls, autoApprove, forceReindex, replaceAllEmissions, runOnly, batchId, tags, cachePdf, callbackUrl } = request.body;
       // Log enqueue request (sanitized)
       app.log.info(
         {
