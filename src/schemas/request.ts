@@ -44,6 +44,7 @@ export const addQueueJobBodySchema = z.object({
     batchId: z.string().optional().describe('Optional batch ID to group related reports for filtering'),
     tags: z.array(z.string()).optional().describe('Optional tags to set on the job/report at creation (e.g. for filtering); passed through to Garbo API. Worker may set or extend tags later'),
     cachePdf: z.boolean().optional().default(false).describe('When true (parsePdf only), fetch each URL and cache the PDF to S3 before enqueueing, so pipeline reads from storage instead of the source URL'),
+    callbackUrl: z.string().url().optional().describe('URL to POST {url} to after indexMarkdown completes. Skips emissions extraction when set.'),
 });
 
 export const rerunQueueJobBodySchema = z.object({
