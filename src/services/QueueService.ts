@@ -171,6 +171,7 @@ export class QueueService {
       runOnly?: string[];
       batchId?: string;
       tags?: string[];
+      callbackUrl?: string;
       /** Extra job data to merge in (e.g. sourceUrl, cache metadata). */
       data?: Record<string, any>;
     },
@@ -189,6 +190,7 @@ export class QueueService {
       ...(options?.runOnly ? { runOnly: options.runOnly } : {}),
       ...(options?.batchId ? { batchId: options.batchId } : {}),
       ...(options?.tags?.length ? { tags: options.tags } : {}),
+      ...(options?.callbackUrl ? { callbackUrl: options.callbackUrl } : {}),
       autoApprove,
       id,
       url: url.trim(),
