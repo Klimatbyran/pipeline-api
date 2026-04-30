@@ -10,7 +10,8 @@ export async function readProcessRoute(app: FastifyInstance) {
     {
       schema: {
         summary: 'Get processes',
-        description: 'Optional batchId filters to processes (reports) in that batch only.',
+        description:
+          'Optional batchId filters to processes (reports) in that batch only (exact match on job `data.batchId`). Values are opaque: often Garbo `Batch.id`, sometimes a legacy label. Garbo resolves when archiving.',
         tags: ['Process'],
         querystring: readProcessesQueryStringSchema,
         response: {
@@ -34,7 +35,8 @@ export async function readProcessRoute(app: FastifyInstance) {
     {
       schema: {
         summary: 'List available batch IDs',
-        description: 'Returns unique batch IDs from all jobs. Use batchId query on /companies to filter by batch.',
+        description:
+          'Returns unique `data.batchId` values from Redis-backed jobs (no Garbo join). Use as a live snapshot for operators; Validate uses Garbo `GET /queue-archive/batches` for the Postgres batch list.',
         tags: ['Process'],
         response: {
           200: z.object({ batches: z.array(z.string()) }),

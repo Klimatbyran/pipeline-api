@@ -1,6 +1,18 @@
 import { QUEUE_NAMES } from "../lib/bullmq";
-import { BaseJob, CompanyProcess, DataJob, Process, ProcessStatus } from "../schemas/types";
+import { BaseJob, CompanyProcess, Process, ProcessStatus } from "../schemas/types";
 import { QueueService } from "./QueueService";
+
+/** Fields used only to build processes; stripped from `Process.jobs` in API responses. */
+function stripJobListingFields(job: BaseJob): BaseJob {
+    const {
+        companyName: _c,
+        reportYear: _y,
+        wikidataNode: _w,
+        batchId: _b,
+        ...rest
+    } = job;
+    return rest;
+}
 
 export class ProcessService {
     private static processService: ProcessService
@@ -18,26 +30,28 @@ export class ProcessService {
     }
 
     public async getProcess(id: string): Promise<Process> {
-        const jobs = await this.queueService.getDataJobs(undefined, undefined, id);
+        const jobs = await this.queueService.getJobs(undefined, undefined, id);
         return this.createProcess(jobs);
     }
 
     public async getProcesses(batchId?: string): Promise<Process[]> {
-        const jobs = await this.queueService.getDataJobs(undefined, undefined, undefined, batchId);
+        // Use getJobs (not getDataJobs): same Redis reads for transform, but we do not
+        // attach full job.data / returnvalue to each row — createProcess only needs BaseJob fields.
+        const jobs = await this.queueService.getJobs(undefined, undefined, undefined, batchId);
         // Debug: log number of jobs fetched across all queues
         // Using console here; Fastify logger isn't directly available in service layer
         console.info('[ProcessService] getProcesses: jobs fetched', { count: jobs.length });
-        const jobProcesses: Record<string, DataJob[]> = {};
+        const jobProcesses: Record<string, BaseJob[]> = {};
         for(const job of jobs) {
             // Group jobs by threadId if available, otherwise group by company name
             // This prevents jobs from different companies without threadId from being grouped together
             let key: string;
-            if(job.data.threadId) {
-                key = job.data.threadId;
+            if(job.threadId) {
+                key = job.threadId;
             } else {
                 // For jobs without threadId, create a unique key per company
                 // This ensures jobs from different companies are in separate processes
-                const companyName = job.data.companyName ?? "unknown";
+                const companyName = job.companyName ?? "unknown";
                 key = `unknown-${companyName}`;
             }
             if(!jobProcesses[key]) {
@@ -83,37 +97,37 @@ export class ProcessService {
     }
 
     /**
-     * Returns unique batch IDs present in job data. Scans all jobs (no index);
-     * may be slow with very large job counts.
+     * Returns unique `data.batchId` strings present in Redis-backed jobs (no index;
+     * may be slow with very large job counts). Values may be Garbo `Batch.id` or legacy labels.
      */
     public async getAvailableBatches(): Promise<string[]> {
-        const jobs = await this.queueService.getDataJobs(undefined, undefined);
+        const jobs = await this.queueService.getJobs(undefined, undefined);
         const batchIds = new Set<string>();
         for (const job of jobs) {
-            const bid = (job.data as { batchId?: string })?.batchId;
+            const bid = job.batchId;
             if (bid && typeof bid === 'string') batchIds.add(bid);
         }
         return Array.from(batchIds).sort();
     }
 
-    private createProcess(jobs: DataJob[]): Process {
+    private createProcess(jobs: BaseJob[]): Process {
         let id: string | undefined;
         let wikidataId: string | undefined;	
         let company: string | undefined;
         let year: number | undefined;
 
         for(const job of jobs) {
-            if(job.data.threadId) {
-                id = job.data.threadId;
+            if(job.threadId) {
+                id = job.threadId;
             }
-            if(job.data.wikidata) {
-                wikidataId = job.data.wikidata.node;
+            if(job.wikidataNode) {
+                wikidataId = job.wikidataNode;
             }
-            if(job.data.companyName) {
-                company = job.data.companyName;
+            if(job.companyName) {
+                company = job.companyName;
             }
-            if(job.data.reportYear) {
-                year = job.data.reportYear;
+            if(job.reportYear !== undefined) {
+                year = job.reportYear;
             }
         }
 
@@ -126,10 +140,7 @@ export class ProcessService {
             }
         }, 0);
 
-        const baseJobs: BaseJob[] = jobs.map(job => {
-            const { data, returnvalue, ...rest } = job;
-            return rest;
-        });
+        const baseJobs: BaseJob[] = jobs.map((job) => stripJobListingFields(job));
 
         // If no threadId, create a process id based on company name to keep them separate
         const processId = id ?? (company ? `unknown-${company}` : "unknown");
@@ -147,7 +158,7 @@ export class ProcessService {
         return process;
     }
 
-    private getProcessStatus(jobs: DataJob[]): ProcessStatus {
+    private getProcessStatus(jobs: BaseJob[]): ProcessStatus {
         if(jobs.find(job => job.status === 'failed')) {
             return 'failed';
         }

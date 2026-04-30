@@ -10,7 +10,9 @@ export const readProcessPathParamsSchema = z.object({
 });
 
 export const readProcessesQueryStringSchema = z.object({
-    batchId: z.string().optional().describe('Filter to processes in this batch only'),
+    batchId: z.string().optional().describe(
+        'Filter to processes in this batch only (exact match on job `data.batchId`). Opaque string: often Garbo `Batch.id` from Validate, or a legacy human-readable label on older jobs. Garbo resolves when archiving (see Garbo queue archive).',
+    ),
 });
 
 export const readQueueQueryStringSchema = z.object({
@@ -29,7 +31,9 @@ export const readQueueJobPathParamsSchema = z.object({
 export const readProcessesByCompanyQueryStringSchema = z.object({
     page: z.coerce.number().int().min(1).optional(),
     pageSize: z.coerce.number().int().min(1).max(500).optional(),
-    batchId: z.string().optional().describe('Filter to processes (reports) in this batch only'),
+    batchId: z.string().optional().describe(
+        'Filter to processes (reports) in this batch only. Same string as job `data.batchId`; Garbo maps it to `Batch.batchName` when persisting archived runs.',
+    ),
 });
 
 // Accept both camelCase and kebab-case for the reindex flag.
@@ -41,7 +45,9 @@ export const addQueueJobBodySchema = z.object({
     forceReindex: z.boolean().optional().describe('Re-index markdown even if already indexed'),
     replaceAllEmissions: z.boolean().optional().default(false).describe('Replace all scope 1,2,3 emissions and totals (delete old ones from all periods) before adding new ones'),
     runOnly: z.array(z.string()).optional().describe('Array of worker/queue names to run (limits pipeline execution to specified steps)'),
-    batchId: z.string().optional().describe('Optional batch ID to group related reports for filtering'),
+    batchId: z.string().optional().describe(
+        'Optional grouping key on job `data.batchId` (opaque string). Prefer Garbo `Batch.id` when enqueueing from Validate; Garbo resolves id or legacy name when saving archived `ReportRun` rows.',
+    ),
     tags: z.array(z.string()).optional().describe('Optional tags to set on the job/report at creation (e.g. for filtering); passed through to Garbo API. Worker may set or extend tags later'),
     cachePdf: z.boolean().optional().default(false).describe('When true (parsePdf only), fetch each URL and cache the PDF to S3 before enqueueing, so pipeline reads from storage instead of the source URL'),
 });

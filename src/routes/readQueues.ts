@@ -238,7 +238,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
     {
       schema: {
         summary: 'Upload PDFs and add parsePdf jobs',
-        description: 'Accept multipart/form-data with PDF files and optional options (autoApprove, batchId, forceReindex, replaceAllEmissions, runOnly, tags). Same job shape as URL-based POST /queues/parsePdf. Requires S3_BUCKET to be set.',
+        description: 'Accept multipart/form-data with PDF files and optional options (autoApprove, batchId, forceReindex, replaceAllEmissions, runOnly, tags). `batchId` is stored on jobs as an opaque string (typically Garbo `Batch.id`). Same job shape as URL-based POST /queues/parsePdf. Requires S3_BUCKET to be set.',
         tags: ['Queues'],
         consumes: ['multipart/form-data'],
         response: {

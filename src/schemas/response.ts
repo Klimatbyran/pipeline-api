@@ -37,6 +37,11 @@ export const baseJobSchema = z.object({
     delay: z.number().optional(),
     approval: approvalSchema.optional(),
     status: jobStatusSchema.optional(),
+    /** Listing metadata from job.data (also on GET /queues/*); omitted from GET /processes/* job arrays. */
+    companyName: z.string().optional(),
+    reportYear: z.number().optional(),
+    wikidataNode: z.string().optional(),
+    batchId: z.string().optional(),
 });
 
 export const dataJobSchema = baseJobSchema.extend({

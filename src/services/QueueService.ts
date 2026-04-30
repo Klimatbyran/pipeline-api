@@ -808,24 +808,34 @@ export class QueueService {
 }
 
 export async function transformJobtoBaseJob(job: Job): Promise<BaseJob> {
+    const data = job.data as Record<string, any> | undefined;
+    const wikidata = data?.wikidata;
+    const wikidataNode =
+        wikidata && typeof wikidata === 'object' && typeof wikidata.node === 'string'
+            ? wikidata.node
+            : undefined;
     return {
         name: job.name,
         queue: job.queueName,
         id: job.id,
-        url: job.data.url ?? undefined,
-        autoApprove: job.data.autoApprove ?? false,
-        processId: job.data.threadId ?? undefined,
-        threadId: job.data.threadId ?? undefined,
+        url: data?.url ?? undefined,
+        autoApprove: data?.autoApprove ?? false,
+        processId: data?.threadId ?? undefined,
+        threadId: data?.threadId ?? undefined,
         timestamp: job.timestamp,
         processedBy: job.processedBy,
         finishedOn: job.finishedOn,
         attemptsMade: job.attemptsMade,
         failedReason: job.failedReason,
         stacktrace: job.stacktrace ?? [],
-        approval: job.data.approval ? job.data.approval : undefined,
+        approval: data?.approval ? data.approval : undefined,
         progress: typeof job.progress === 'number' ? job.progress : undefined,
         opts: job.opts,
         delay: job.delay,
-        status: (await job.getState()) as JobType
+        status: (await job.getState()) as JobType,
+        companyName: typeof data?.companyName === 'string' ? data.companyName : undefined,
+        reportYear: typeof data?.reportYear === 'number' ? data.reportYear : undefined,
+        wikidataNode,
+        batchId: typeof data?.batchId === 'string' ? data.batchId : undefined,
     };
 }
