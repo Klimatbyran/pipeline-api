@@ -87,21 +87,17 @@ export class QueueService {
     const jobs: BaseJob[] = [];
     for (const queueName of queueNames) {
       const queue = await this.getQueue(queueName);
-      const counts = await queue.getJobCounts(...(queryStatus as JobType[]));
-      for (const status of queryStatus) {
-        if ((counts[status] ?? 0) === 0) continue;
-        const rawJobs = await queue.getJobs([status as JobType]);
-        const filteredRawJobs = rawJobs.filter((job) => {
-          if (processId && job.data?.threadId !== processId) return false;
-          if (batchId != null && (job.data as any)?.batchId !== batchId)
-            return false;
-          return true;
-        });
-        const transformedJobs = await Promise.all(
-          filteredRawJobs.map((job) => transformJobtoBaseJob(job, status)),
-        );
-        jobs.push(...transformedJobs);
-      }
+      const rawJobs = await queue.getJobs(queryStatus as JobType[]);
+      const filteredRawJobs = rawJobs.filter((job) => {
+        if (processId && job.data?.threadId !== processId) return false;
+        if (batchId != null && (job.data as any)?.batchId !== batchId)
+          return false;
+        return true;
+      });
+      const transformedJobs = await Promise.all(
+        filteredRawJobs.map((job) => transformJobtoBaseJob(job)),
+      );
+      jobs.push(...transformedJobs);
     }
     return jobs;
   }
@@ -125,38 +121,34 @@ export class QueueService {
         const counts = await queue.getJobCounts(...(queryStatus as JobType[]));
         if (Object.values(counts).every((c) => c === 0)) return [];
 
-        // Fetch one status at a time so we know each job's state without calling getState()
+        // Paginate instead of fetching all
         const PAGE_SIZE = 100;
-        const rawJobsWithState: Array<{ job: Job; state: string }> = [];
+        let start = 0;
+        const rawJobs: Job[] = [];
 
-        for (const status of queryStatus) {
-          if ((counts[status] ?? 0) === 0) continue;
+        while (true) {
+          const page = await queue.getJobs(
+            queryStatus as JobType[],
+            start,
+            start + PAGE_SIZE - 1,
+          );
+          if (page.length === 0) break;
 
-          let start = 0;
-          while (true) {
-            const page = await queue.getJobs(
-              [status as JobType],
-              start,
-              start + PAGE_SIZE - 1,
-            );
-            if (page.length === 0) break;
+          const filtered = page.filter((job) => {
+            if (processId && job.data?.threadId !== processId) return false;
+            if (batchId != null && (job.data as any)?.batchId !== batchId)
+              return false;
+            return true;
+          });
 
-            const filtered = page.filter((job) => {
-              if (processId && job.data?.threadId !== processId) return false;
-              if (batchId != null && (job.data as any)?.batchId !== batchId)
-                return false;
-              return true;
-            });
-
-            rawJobsWithState.push(...filtered.map((job) => ({ job, state: status })));
-            if (page.length < PAGE_SIZE) break;
-            start += PAGE_SIZE;
-          }
+          rawJobs.push(...filtered);
+          if (page.length < PAGE_SIZE) break;
+          start += PAGE_SIZE;
         }
 
         return Promise.all(
-          rawJobsWithState.map(async ({ job, state }) => {
-            const dataJob: DataJob = await transformJobtoBaseJob(job, state);
+          rawJobs.map(async (job) => {
+            const dataJob: DataJob = await transformJobtoBaseJob(job);
             dataJob.data = job.data;
             dataJob.returnvalue = job.returnvalue;
             return dataJob;
@@ -1037,7 +1029,7 @@ export class QueueService {
   }
 }
 
-export async function transformJobtoBaseJob(job: Job, knownState?: string): Promise<BaseJob> {
+export async function transformJobtoBaseJob(job: Job): Promise<BaseJob> {
   return {
     name: job.name,
     queue: job.queueName,
@@ -1056,6 +1048,6 @@ export async function transformJobtoBaseJob(job: Job, knownState?: string): Prom
     progress: typeof job.progress === "number" ? job.progress : undefined,
     opts: job.opts,
     delay: job.delay,
-    status: (knownState ?? await job.getState()) as JobType,
+    status: (await job.getState()) as JobType,
   };
 }
