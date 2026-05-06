@@ -1,5 +1,9 @@
 import { createHash } from "crypto";
-import { PDF_MAX_BYTES, uploadPdfAndGetUrls, type PdfUploadResult } from "./S3UploadService";
+import {
+  PDF_MAX_BYTES,
+  uploadPdfAndGetUrls,
+  type PdfUploadResult,
+} from "./S3UploadService";
 import { getRedisClient } from "../lib/redis-client";
 import {
   assertBufferLooksLikePdf,
@@ -21,6 +25,8 @@ export type PdfCacheEntry = {
   contentLength?: number;
 };
 
+const inFlightCacheByUrlKey = new Map<string, Promise<PdfCacheEntry>>();
+
 function getUploadEnv(): string {
   const nodeEnv = (process.env.NODE_ENV ?? "").trim();
   if (nodeEnv === "production") return "prod";
@@ -32,7 +38,10 @@ function sha1Hex(input: string): string {
   return createHash("sha1").update(input).digest("hex");
 }
 
-async function fetchPdfToBuffer(url: string, maxBytes: number): Promise<{ buffer: Buffer; contentLength?: number }> {
+async function fetchPdfToBuffer(
+  url: string,
+  maxBytes: number,
+): Promise<{ buffer: Buffer; contentLength?: number }> {
   let currentUrl = url;
   const signal = AbortSignal.timeout(PDF_FETCH_TIMEOUT_MS);
 
@@ -64,14 +73,21 @@ async function fetchPdfToBuffer(url: string, maxBytes: number): Promise<{ buffer
     }
 
     const contentLengthHeader = res.headers.get("content-length");
-    const contentLength = contentLengthHeader ? Number(contentLengthHeader) : undefined;
-    if (typeof contentLength === "number" && Number.isFinite(contentLength) && contentLength > maxBytes) {
+    const contentLength = contentLengthHeader
+      ? Number(contentLengthHeader)
+      : undefined;
+    if (
+      typeof contentLength === "number" &&
+      Number.isFinite(contentLength) &&
+      contentLength > maxBytes
+    ) {
       throw new Error(`PDF too large (max ${maxBytes / 1024 / 1024} MB)`);
     }
 
     if (!res.body) {
       const arr = new Uint8Array(await res.arrayBuffer());
-      if (arr.byteLength > maxBytes) throw new Error(`PDF too large (max ${maxBytes / 1024 / 1024} MB)`);
+      if (arr.byteLength > maxBytes)
+        throw new Error(`PDF too large (max ${maxBytes / 1024 / 1024} MB)`);
       const buffer = Buffer.from(arr);
       assertBufferLooksLikePdf(buffer);
       return { buffer, contentLength: arr.byteLength };
@@ -101,40 +117,61 @@ function buildUrlMapKey(env: string, sourceUrl: string): string {
   return `pdf:urlmap:${env}:${sha1Hex(sourceUrl)}`;
 }
 
-export async function cachePdfFromUrl(sourceUrl: string): Promise<PdfCacheEntry> {
+export async function cachePdfFromUrl(
+  sourceUrl: string,
+): Promise<PdfCacheEntry> {
   const env = getUploadEnv();
   const redis = getRedisClient();
   const urlKey = buildUrlMapKey(env, sourceUrl);
   const TTL_SECONDS = 14 * 24 * 60 * 60; // 14 days
 
-  const cachedJson = await redis.get(urlKey);
-  if (cachedJson) {
-    try {
-      const parsed = JSON.parse(cachedJson) as PdfCacheEntry;
-      if (parsed?.publicUrl && parsed?.key && parsed?.sha256) return parsed;
-    } catch {
-      /* ignore and recompute */
-    }
+  const existingInFlight = inFlightCacheByUrlKey.get(urlKey);
+  if (existingInFlight) {
+    return existingInFlight;
   }
 
-  const { buffer, contentLength } = await fetchPdfToBuffer(sourceUrl, PDF_MAX_BYTES);
-  const upload: PdfUploadResult = await uploadPdfAndGetUrls(buffer, sourceUrl);
+  const work = (async (): Promise<PdfCacheEntry> => {
+    const cachedJson = await redis.get(urlKey);
+    if (cachedJson) {
+      try {
+        const parsed = JSON.parse(cachedJson) as PdfCacheEntry;
+        if (parsed?.publicUrl && parsed?.key && parsed?.sha256) return parsed;
+      } catch {
+        /* ignore and recompute */
+      }
+    }
 
-  const entry: PdfCacheEntry = {
-    env,
-    sourceUrl,
-    sha256: upload.sha256,
-    bucket: upload.bucket,
-    key: upload.key,
-    publicUrl: upload.publicUrl,
-    reusedExisting: upload.reusedExisting,
-    uploaded: upload.uploaded,
-    fetchedAt: new Date().toISOString(),
-    ...(typeof contentLength === "number" ? { contentLength } : {}),
-  };
+    const { buffer, contentLength } = await fetchPdfToBuffer(
+      sourceUrl,
+      PDF_MAX_BYTES,
+    );
+    const upload: PdfUploadResult = await uploadPdfAndGetUrls(
+      buffer,
+      sourceUrl,
+    );
 
-  const payload = JSON.stringify(entry);
-  await redis.set(urlKey, payload, "EX", TTL_SECONDS);
+    const entry: PdfCacheEntry = {
+      env,
+      sourceUrl,
+      sha256: upload.sha256,
+      bucket: upload.bucket,
+      key: upload.key,
+      publicUrl: upload.publicUrl,
+      reusedExisting: upload.reusedExisting,
+      uploaded: upload.uploaded,
+      fetchedAt: new Date().toISOString(),
+      ...(typeof contentLength === "number" ? { contentLength } : {}),
+    };
 
-  return entry;
+    const payload = JSON.stringify(entry);
+    await redis.set(urlKey, payload, "EX", TTL_SECONDS);
+
+    return entry;
+  })().finally(() => {
+    inFlightCacheByUrlKey.delete(urlKey);
+  });
+
+  inFlightCacheByUrlKey.set(urlKey, work);
+
+  return work;
 }

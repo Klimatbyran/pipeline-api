@@ -1,23 +1,24 @@
-import { HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
-import { S3Client } from '@aws-sdk/client-s3';
-import { getS3Config } from '../config/s3';
-import { createHash } from 'crypto';
+import { HeadObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client } from "@aws-sdk/client-s3";
+import { getS3Config } from "../config/s3";
+import { createHash } from "crypto";
 
 /** Max size per PDF (e.g. annual reports with images). Kept in sync with multipart limit in app.ts. */
 export const PDF_MAX_BYTES = 400 * 1024 * 1024; // 400 MB per file
-const PDF_MIME = 'application/pdf';
+const PDF_MIME = "application/pdf";
 
 let client: S3Client | null = null;
+const inFlightUploadByHash = new Map<string, Promise<PdfUploadResult>>();
 
 function getTrimmedEnv(name: string): string | undefined {
   const value = process.env[name];
-  if (typeof value !== 'string') return undefined;
+  if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function getS3Endpoint(): string | undefined {
-  return getTrimmedEnv('S3_ENDPOINT');
+  return getTrimmedEnv("S3_ENDPOINT");
 }
 
 function getClient(): S3Client {
@@ -57,48 +58,52 @@ export type PdfUploadResult = {
 };
 
 function getUploadEnv(): string {
-  const nodeEnv = getTrimmedEnv('NODE_ENV');
-  if (nodeEnv === 'production') return 'prod';
-  if (nodeEnv === 'staging') return 'stage';
-  return 'dev';
+  const nodeEnv = getTrimmedEnv("NODE_ENV");
+  if (nodeEnv === "production") return "prod";
+  if (nodeEnv === "staging") return "stage";
+  return "dev";
 }
 
 function getPublicUrlForKey(params: { bucket: string; key: string }): string {
   const { bucket, key } = params;
-  const publicBase = getTrimmedEnv('S3_PUBLIC_BASE_URL');
+  const publicBase = getTrimmedEnv("S3_PUBLIC_BASE_URL");
   const endpoint = getS3Endpoint();
 
   if (publicBase) {
-    return `${publicBase.replace(/\/$/, '')}/${key}`;
+    return `${publicBase.replace(/\/$/, "")}/${key}`;
   }
   if (endpoint) {
-    const base = endpoint.replace(/\/$/, '');
+    const base = endpoint.replace(/\/$/, "");
     return `${base}/${bucket}/${key}`;
   }
   throw new Error(
-    'Public URL is not configured. Set S3_PUBLIC_BASE_URL (e.g. https://storage.googleapis.com/<bucket>) or S3_ENDPOINT (e.g. https://storage.googleapis.com) so uploaded PDFs can be accessed later.'
+    "Public URL is not configured. Set S3_PUBLIC_BASE_URL (e.g. https://storage.googleapis.com/<bucket>) or S3_ENDPOINT (e.g. https://storage.googleapis.com) so uploaded PDFs can be accessed later.",
   );
 }
 
 function sha256Hex(buffer: Buffer): string {
-  return createHash('sha256').update(buffer).digest('hex');
+  return createHash("sha256").update(buffer).digest("hex");
 }
 
-async function objectExists(params: { bucket: string; key: string }): Promise<boolean> {
+async function objectExists(params: {
+  bucket: string;
+  key: string;
+}): Promise<boolean> {
   const s3 = getClient();
   try {
     await s3.send(
       new HeadObjectCommand({
         Bucket: params.bucket,
         Key: params.key,
-      })
+      }),
     );
     return true;
   } catch (err: any) {
     // AWS SDK v3 throws for 404/NotFound; treat those as "does not exist"
     const httpStatus = err?.$metadata?.httpStatusCode;
     const name = err?.name;
-    if (httpStatus === 404 || name === 'NotFound' || name === 'NoSuchKey') return false;
+    if (httpStatus === 404 || name === "NotFound" || name === "NoSuchKey")
+      return false;
     throw err;
   }
 }
@@ -113,7 +118,7 @@ async function objectExists(params: { bucket: string; key: string }): Promise<bo
  */
 export async function uploadPdfAndGetUrls(
   buffer: Buffer,
-  filename?: string
+  filename?: string,
 ): Promise<PdfUploadResult> {
   if (buffer.length > PDF_MAX_BYTES) {
     throw new Error(`PDF too large (max ${PDF_MAX_BYTES / 1024 / 1024} MB)`);
@@ -124,37 +129,54 @@ export async function uploadPdfAndGetUrls(
   const sha256 = sha256Hex(buffer);
   const key = `uploads/${env}/${sha256}.pdf`;
 
-  const existed = await objectExists({ bucket, key });
-  if (!existed) {
-    const s3 = getClient();
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: bucket,
-        Key: key,
-        Body: buffer,
-        ContentType: PDF_MIME,
-        // Keep a small trace for humans; not used for dedupe logic.
-        Metadata: filename ? { originalFilename: filename } : undefined,
-      })
-    );
+  const inFlightKey = `${bucket}:${key}`;
+  const existingInFlight = inFlightUploadByHash.get(inFlightKey);
+  if (existingInFlight) {
+    return existingInFlight;
   }
 
-  const publicUrl = getPublicUrlForKey({ bucket, key });
-  return {
-    publicUrl,
-    bucket,
-    key,
-    sha256,
-    reusedExisting: existed,
-    uploaded: !existed,
-  };
+  const work = (async (): Promise<PdfUploadResult> => {
+    const existed = await objectExists({ bucket, key });
+    if (!existed) {
+      const s3 = getClient();
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          Body: buffer,
+          ContentType: PDF_MIME,
+          // Keep a small trace for humans; not used for dedupe logic.
+          Metadata: filename ? { originalFilename: filename } : undefined,
+        }),
+      );
+    }
+
+    const publicUrl = getPublicUrlForKey({ bucket, key });
+    return {
+      publicUrl,
+      bucket,
+      key,
+      sha256,
+      reusedExisting: existed,
+      uploaded: !existed,
+    };
+  })().finally(() => {
+    inFlightUploadByHash.delete(inFlightKey);
+  });
+
+  inFlightUploadByHash.set(inFlightKey, work);
+
+  return work;
 }
 
 /**
  * Back-compat helper: existing callers expect a single URL string.
  * Returns the stable public URL.
  */
-export async function uploadPdfAndGetUrl(buffer: Buffer, filename?: string): Promise<string> {
+export async function uploadPdfAndGetUrl(
+  buffer: Buffer,
+  filename?: string,
+): Promise<string> {
   const { publicUrl } = await uploadPdfAndGetUrls(buffer, filename);
   return publicUrl;
 }
