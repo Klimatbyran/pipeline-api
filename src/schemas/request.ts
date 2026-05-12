@@ -40,6 +40,8 @@ export const addQueueJobBodySchema = z.object({
     urls: z.array(string().url()),
     forceReindex: z.boolean().optional().describe('Re-index markdown even if already indexed'),
     replaceAllEmissions: z.boolean().optional().default(false).describe('Replace all scope 1,2,3 emissions and totals (delete old ones from all periods) before adding new ones'),
+    forceWikidataReview: z.boolean().optional().default(false).describe('DEPRECATED: Use isNewCompanyReport instead. Force manual review...'),
+    isNewCompanyReport: z.boolean().optional().default(false).describe('Indicates this is a report for a new company...'),
     runOnly: z.array(z.string()).optional().describe('Array of worker/queue names to run (limits pipeline execution to specified steps)'),
     batchId: z.string().optional().describe('Optional batch ID to group related reports for filtering'),
     tags: z.array(z.string()).optional().describe('Optional tags to set on the job/report at creation (e.g. for filtering); passed through to Garbo API. Worker may set or extend tags later'),

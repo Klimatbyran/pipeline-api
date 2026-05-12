@@ -168,16 +168,23 @@ export class QueueService {
       forceReindex?: boolean;
       threadId?: string;
       replaceAllEmissions?: boolean;
+      forceWikidataReview?: boolean;
+      isNewCompanyReport?: boolean;
       runOnly?: string[];
       batchId?: string;
       tags?: string[];
       callbackUrl?: string;
       /** Extra job data to merge in (e.g. sourceUrl, cache metadata). */
       data?: Record<string, any>;
-    },
+
+}
+
   ): Promise<BaseJob> {
     const queue = await this.getQueue(queueName);
     const id = crypto.randomUUID();
+    // Hantera bakåtkompatibilitet för forceWikidataReview/isNewCompanyReport
+    const shouldForceWikidataReview = options?.isNewCompanyReport ?? options?.forceWikidataReview ?? false;
+
     const job = await queue.add("download " + url.slice(-20), {
       ...(options?.data ? options.data : {}),
       ...(options?.threadId ? { threadId: options.threadId } : {}),
@@ -186,6 +193,9 @@ export class QueueService {
         : {}),
       ...(options?.replaceAllEmissions !== undefined
         ? { replaceAllEmissions: options.replaceAllEmissions }
+        : {}),
+      ...(shouldForceWikidataReview !== undefined
+        ? { forceWikidataReview: shouldForceWikidataReview }
         : {}),
       ...(options?.runOnly ? { runOnly: options.runOnly } : {}),
       ...(options?.batchId ? { batchId: options.batchId } : {}),
