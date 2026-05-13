@@ -51,6 +51,7 @@ export const QUEUE_NAMES = {
   DIFF_INITIATIVES: "diffInitiatives",
   DIFF_REPORTING_PERIODS: "diffReportingPeriods",
   DIFF_TAGS: "diffTags",
+  EXTRACT_LEI: "extractLEI",
   SAVE_TO_API: "saveToAPI",
   SEND_COMPANY_LINK: "sendCompanyLink",
   WIKIPEDIA_UPLOAD: "wikipediaUpload",
