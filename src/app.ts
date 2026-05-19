@@ -8,6 +8,7 @@ import { readFileSync } from 'fs'
 import { resolve } from 'path'
 import apiConfig from './config/api'
 import { readQueuesRoute } from './routes/readQueues'
+import { cachePdfRoute } from './routes/cachePdf'
 import { jsonSchemaTransform, serializerCompiler, validatorCompiler, ZodTypeProvider } from 'fastify-type-provider-zod'
 import { z } from 'zod'
 import { readProcessRoute } from './routes/readProcess'
@@ -69,11 +70,12 @@ async function startApp() {
     const writeMethods = ['POST', 'PUT', 'PATCH', 'DELETE'];
     const isWriteOperation = writeMethods.includes(method);
     
-    // Protected route patterns (queues, processes, pipeline)
+    // Protected route patterns (queues, processes, pipeline, cache-pdf)
     const protectedRoutePatterns = [
       '/api/queues',
       '/api/processes',
       '/api/pipeline',
+      '/api/cache-pdf',
     ];
     
     // Check if this is a public endpoint
@@ -129,6 +131,9 @@ async function startApp() {
     }
   });
 
+  app.register(cachePdfRoute, {
+    prefix: '/api/cache-pdf',
+  })
   app.register(readQueuesRoute, {
     prefix: '/api/queues',
   })
