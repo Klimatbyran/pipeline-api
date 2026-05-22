@@ -64,7 +64,7 @@ async function startQueues() {
         connection: redis,
         defaultJobOptions: {
           removeOnComplete: {
-            age: 7_200, // 2 hours in seconds
+            count: 30,
           },
           removeOnFail: {
             age: 1_209_600, // 2 weeks in seconds
