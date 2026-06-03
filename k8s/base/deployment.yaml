@@ -20,10 +20,10 @@ spec:
           image: ghcr.io/klimatbyran/pipeline-api
           resources:
             requests:
-              memory: "512Mi"
+              memory: "768Mi"
               cpu: "250m"
             limits:
-              memory: "1280Mi"
+              memory: "2Gi"
               cpu: "500m"
           ports:
             - containerPort: 4000
