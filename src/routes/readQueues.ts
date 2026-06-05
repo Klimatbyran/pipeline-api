@@ -347,22 +347,27 @@ export async function readQueuesRoute(app: FastifyInstance) {
       if (!resolvedName) {
         return reply.status(400).send({ error: `Unknown queue '${name}'. Valid queues: ${Object.values(QUEUE_NAMES).join(', ')}` });
       }
-      const { urls, autoApprove, forceReindex, replaceAllEmissions, runOnly, batchId, tags, cachePdf, callbackUrl } = request.body;
+      const { urls, autoApprove, forceReindex, replaceAllEmissions, forceWikidataReview, isNewCompanyReport, runOnly, batchId, tags, cachePdf, callbackUrl } = request.body;
+      const shouldForceWikidataReview = isNewCompanyReport ?? forceWikidataReview ?? false;
+
+      if (forceWikidataReview && !isNewCompanyReport) {
+        app.log.warn('Using deprecated field "forceWikidataReview". Consider using "isNewCompanyReport" instead.');
+      }
       // Log enqueue request (sanitized)
-      app.log.info(
-        {
-          queue: name,
-          urlsCount: Array.isArray(urls) ? urls.length : 0,
-          autoApprove: !!autoApprove,
-          forceReindex: !!forceReindex,
-          replaceAllEmissions: !!replaceAllEmissions,
-          runOnly: runOnly,
-          batchId: batchId ?? undefined,
-          tags: tags ?? undefined,
-          cachePdf: !!cachePdf,
-        },
-        'Enqueue request received'
-      );
+      app.log.info({
+      queue: name,
+      urlsCount: Array.isArray(urls) ? urls.length : 0,
+      autoApprove: !!autoApprove,
+      forceReindex: !!forceReindex,
+      replaceAllEmissions: !!replaceAllEmissions,
+      forceWikidataReview: !!forceWikidataReview,  
+      isNewCompanyReport: !!isNewCompanyReport,    
+      runOnly: runOnly,
+      batchId: batchId ?? undefined,
+      tags: tags ?? undefined,
+      cachePdf: !!cachePdf,
+    }, 'Enqueue request received');
+    
       const queueService = await QueueService.getQueueService();
       const addedJobs: BaseJob[] = [];
       const cached: PdfCacheEntry[] = [];
@@ -382,6 +387,8 @@ export async function readQueuesRoute(app: FastifyInstance) {
               forceReindex,
               threadId: perUrlThreadId,
               replaceAllEmissions,
+              forceWikidataReview,
+              isNewCompanyReport,
               runOnly,
               batchId,
               tags,
@@ -408,7 +415,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
           continue;
         }
         const perUrlThreadId = randomUUID();
-        const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: perUrlThreadId, replaceAllEmissions, runOnly, batchId, tags, callbackUrl });
+        const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: perUrlThreadId, replaceAllEmissions, forceWikidataReview, isNewCompanyReport, runOnly, batchId, tags, callbackUrl });
         addedJobs.push(addedJob);
       }
 
