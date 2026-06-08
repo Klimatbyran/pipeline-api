@@ -10,6 +10,7 @@ import { z } from "zod";
 import { type PdfUploadResult, uploadPdfAndGetUrls } from "../services/S3UploadService";
 import { isS3Configured } from "../config/s3";
 import { cachePdfFromUrl, type PdfCacheEntry } from "../services/PdfCacheService";
+import { withDocumentReportYearFields } from "../lib/documentReportYear";
 
 const pdfUploadMetaSchema = z.object({
   filename: z.string(),
@@ -87,17 +88,20 @@ async function uploadAndEnqueueParsePdfJobs(params: {
       runOnly: options.runOnly,
       batchId: options.batchId,
       tags: options.tags,
-      data: {
-        sourceUrl: `uploaded:${filename}`,
-        pdfCache: {
-          sha256: upload.sha256,
-          bucket: upload.bucket,
-          key: upload.key,
-          publicUrl: upload.publicUrl,
-          reusedExisting: upload.reusedExisting,
-          uploaded: upload.uploaded,
+      data: withDocumentReportYearFields(
+        {
+          sourceUrl: `uploaded:${filename}`,
+          pdfCache: {
+            sha256: upload.sha256,
+            bucket: upload.bucket,
+            key: upload.key,
+            publicUrl: upload.publicUrl,
+            reusedExisting: upload.reusedExisting,
+            uploaded: upload.uploaded,
+          },
         },
-      },
+        `uploaded:${filename}`,
+      ),
     });
     request.log.info({ filename, jobId: addedJob.id }, 'BullMQ job added successfully');
     addedJobs.push(addedJob);
@@ -385,18 +389,21 @@ export async function readQueuesRoute(app: FastifyInstance) {
               runOnly,
               batchId,
               tags,
-              data: {
-                sourceUrl: url,
-                pdfCache: {
-                  sha256: entry.sha256,
-                  bucket: entry.bucket,
-                  key: entry.key,
-                  publicUrl: entry.publicUrl,
-                  reusedExisting: entry.reusedExisting,
-                  uploaded: entry.uploaded,
-                  fetchedAt: entry.fetchedAt,
+              data: withDocumentReportYearFields(
+                {
+                  sourceUrl: url,
+                  pdfCache: {
+                    sha256: entry.sha256,
+                    bucket: entry.bucket,
+                    key: entry.key,
+                    publicUrl: entry.publicUrl,
+                    reusedExisting: entry.reusedExisting,
+                    uploaded: entry.uploaded,
+                    fetchedAt: entry.fetchedAt,
+                  },
                 },
-              },
+                url,
+              ),
             });
             addedJobs.push(addedJob);
             cached.push(entry);
@@ -408,7 +415,26 @@ export async function readQueuesRoute(app: FastifyInstance) {
           continue;
         }
         const perUrlThreadId = randomUUID();
-        const addedJob = await queueService.addJob(resolvedName, url, autoApprove, { forceReindex, threadId: perUrlThreadId, replaceAllEmissions, runOnly, batchId, tags, callbackUrl });
+        const jobOptions = {
+          forceReindex,
+          threadId: perUrlThreadId,
+          replaceAllEmissions,
+          runOnly,
+          batchId,
+          tags,
+          callbackUrl,
+          ...(resolvedName === QUEUE_NAMES.PARSE_PDF
+            ? {
+                data: withDocumentReportYearFields({ sourceUrl: url }, url),
+              }
+            : {}),
+        };
+        const addedJob = await queueService.addJob(
+          resolvedName,
+          url,
+          autoApprove,
+          jobOptions,
+        );
         addedJobs.push(addedJob);
       }
 

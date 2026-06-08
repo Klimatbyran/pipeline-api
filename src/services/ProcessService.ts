@@ -138,8 +138,9 @@ export class ProcessService {
       if (job.data.companyName) {
         company = job.data.companyName;
       }
-      if (job.data.reportYear) {
-        year = job.data.reportYear;
+      const jobYear = job.data.reportYear ?? job.data.documentReportYear;
+      if (jobYear !== undefined && jobYear !== null) {
+        year = Number(jobYear);
       }
     }
 
