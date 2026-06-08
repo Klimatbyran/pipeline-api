@@ -12,23 +12,19 @@ export function parseReportYearFromUrl(
   return String(Math.max(...years));
 }
 
-/** PDF year to attach to parsePdf job data when enqueueing from a source URL. */
-export function documentReportYearFromSourceUrl(
-  sourceUrl: string | null | undefined,
-): string | undefined {
-  const year = parseReportYearFromUrl(sourceUrl);
-  return year ?? undefined;
-}
-
-export function withDocumentReportYearFields(
+/**
+ * URL-derived year for queue UI only. Garbo save uses job.data.documentReportYear
+ * as a trusted pipeline field (parse/prompt/operator), so we must not set that
+ * from the URL at enqueue — save falls back to URL only when periods lack years.
+ */
+export function withUrlReportYearForDisplay(
   data: Record<string, unknown>,
   sourceUrl: string | null | undefined,
 ): Record<string, unknown> {
-  const documentReportYear = documentReportYearFromSourceUrl(sourceUrl);
-  if (!documentReportYear) return data;
+  const yearFromUrl = parseReportYearFromUrl(sourceUrl);
+  if (!yearFromUrl) return data;
   return {
     ...data,
-    documentReportYear,
-    reportYear: Number(documentReportYear),
+    reportYear: Number(yearFromUrl),
   };
 }
