@@ -4,6 +4,7 @@ import {
   RetentionJobRef,
   SelectRunsToPruneOptions,
   buildRunSummaries,
+  runMatchesCompanyFilter,
   selectRunsToPrune,
 } from "../lib/runRetention";
 import { QueueService } from "./QueueService";
@@ -76,8 +77,7 @@ export class RunRetentionService {
       runs
         .filter((run) =>
           options.companyName
-            ? run.companyKey.toLowerCase() ===
-              options.companyName.trim().toLowerCase()
+            ? runMatchesCompanyFilter(run, options.companyName)
             : true,
         )
         .map((run) => run.companyKey),

@@ -14,8 +14,23 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: prune-runs
-              image: pipeline-api
+              image: ghcr.io/klimatbyran/pipeline-api
               command: ["npm", "run", "prune-runs-by-company"]
-              envFrom:
-                - secretRef:
-                    name: pipeline-api-secrets
+              env:
+                - name: REDIS_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: redis
+                      key: redis-password
+                - name: REDIS_HOST
+                  value: redis-master.garbo-stage.svc.cluster.local
+                - name: INTERNAL_SERVICE_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: env
+                      key: INTERNAL_SERVICE_TOKEN
+                - name: NODE_ENV
+                  valueFrom:
+                    secretKeyRef:
+                      name: env
+                      key: NODE_ENV

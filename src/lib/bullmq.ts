@@ -58,8 +58,9 @@ export const QUEUE_NAMES = {
 };
 
 export const DEFAULT_PIPELINE_JOB_OPTIONS = {
+  // Overflow safety net only — run-level pruning is authoritative.
   removeOnComplete: {
-    count: 15,
+    count: 30,
   },
   removeOnFail: {
     age: 1_209_600, // 2 weeks in seconds

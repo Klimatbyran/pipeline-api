@@ -43,16 +43,19 @@ export function normalizeCompanyName(name: string | undefined): string | null {
 }
 
 /** Stable per-company bucket for retention grouping. */
-export function deriveCompanyKey(jobs: RetentionJobRef[]): string {
+export function deriveCompanyKey(
+  jobs: RetentionJobRef[],
+  threadId: string,
+): string {
   for (const job of jobs) {
     const name = normalizeCompanyName(job.companyName);
-    if (name) return name;
+    if (name) return name.toLowerCase();
   }
   for (const job of jobs) {
     const id = job.companyId?.trim();
     if (id) return `companyId:${id}`;
   }
-  return "unknown";
+  return `unknown:${threadId}`;
 }
 
 export function isLiveJobStatus(status: string | undefined): boolean {
@@ -84,7 +87,7 @@ export function buildRunSummaries(jobs: RetentionJobRef[]): RunSummary[] {
     const hasLiveJob = threadJobs.some((job) => isLiveJobStatus(job.status));
     runs.push({
       threadId,
-      companyKey: deriveCompanyKey(threadJobs),
+      companyKey: deriveCompanyKey(threadJobs, threadId),
       sortMs: runSortMs(threadJobs),
       hasLiveJob,
       jobRefs: threadJobs,
@@ -102,6 +105,21 @@ export function companyKeyMatches(
   return runCompanyKey.toLowerCase() === normalized.toLowerCase();
 }
 
+export function runMatchesCompanyFilter(
+  run: RunSummary,
+  filterCompanyName: string,
+): boolean {
+  if (companyKeyMatches(run.companyKey, filterCompanyName)) return true;
+
+  const normalized = normalizeCompanyName(filterCompanyName)?.toLowerCase();
+  if (!normalized) return false;
+
+  return run.jobRefs.some(
+    (job) =>
+      normalizeCompanyName(job.companyName)?.toLowerCase() === normalized,
+  );
+}
+
 export type SelectRunsToPruneOptions = {
   keepCount?: number;
   companyName?: string;
@@ -114,7 +132,9 @@ export function selectRunsToPrune(
 ): PruneSelectionResult {
   const keepCount = options.keepCount ?? DEFAULT_KEEP_RUN_COUNT;
   const filtered = options.companyName
-    ? runs.filter((run) => companyKeyMatches(run.companyKey, options.companyName!))
+    ? runs.filter((run) =>
+        runMatchesCompanyFilter(run, options.companyName!),
+      )
     : runs;
 
   const byCompany = new Map<string, RunSummary[]>();

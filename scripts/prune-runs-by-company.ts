@@ -2,8 +2,16 @@ import { RunRetentionService } from "../src/services/RunRetentionService";
 
 function readArg(name: string): string | undefined {
   const prefix = `--${name}=`;
-  const match = process.argv.find((arg) => arg.startsWith(prefix));
-  return match ? match.slice(prefix.length) : undefined;
+  const equalsMatch = process.argv.find((arg) => arg.startsWith(prefix));
+  if (equalsMatch) return equalsMatch.slice(prefix.length);
+
+  const flagIndex = process.argv.indexOf(`--${name}`);
+  if (flagIndex >= 0) {
+    const next = process.argv[flagIndex + 1];
+    if (next && !next.startsWith("--")) return next;
+  }
+
+  return undefined;
 }
 
 function hasFlag(name: string): boolean {
