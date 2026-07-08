@@ -57,19 +57,21 @@ export const QUEUE_NAMES = {
   WIKIPEDIA_UPLOAD: "wikipediaUpload",
 };
 
+export const DEFAULT_PIPELINE_JOB_OPTIONS = {
+  removeOnComplete: {
+    count: 15,
+  },
+  removeOnFail: {
+    age: 1_209_600, // 2 weeks in seconds
+  },
+};
+
 async function startQueues() {
   const queues = Object.values(QUEUE_NAMES).map(
     (name) =>
       new Queue(name, {
         connection: redis,
-        defaultJobOptions: {
-          removeOnComplete: {
-            count: 30,
-          },
-          removeOnFail: {
-            age: 1_209_600, // 2 weeks in seconds
-          },
-        },
+        defaultJobOptions: DEFAULT_PIPELINE_JOB_OPTIONS,
       }),
   );
   await Promise.all(queues.map((queue) => queue.waitUntilReady()));

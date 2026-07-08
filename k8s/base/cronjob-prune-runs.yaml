@@ -1,0 +1,21 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pipeline-api-prune-runs
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: prune-runs
+              image: pipeline-api
+              command: ["npm", "run", "prune-runs-by-company"]
+              envFrom:
+                - secretRef:
+                    name: pipeline-api-secrets

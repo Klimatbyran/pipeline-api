@@ -5,7 +5,9 @@
     "build": "tsc",
     "start": "node --max-old-space-size=4096 --import tsx src/index.ts",
     "dev": "node --max-old-space-size=4096 --import tsx --watch src/index.ts",
-    "clean-old-bullmq": "node --max-old-space-size=512 --import tsx scripts/clean-old-bullmq.ts"
+    "clean-old-bullmq": "node --max-old-space-size=512 --import tsx scripts/clean-old-bullmq.ts",
+    "prune-runs-by-company": "node --max-old-space-size=512 --import tsx scripts/prune-runs-by-company.ts",
+    "test": "node --import tsx --test src/lib/runRetention.test.ts"
   },
   "author": "Christian Landgren, Moritz Zingg et al.",
   "license": "ISC",

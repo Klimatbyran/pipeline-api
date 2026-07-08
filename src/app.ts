@@ -13,6 +13,7 @@ import { jsonSchemaTransform, serializerCompiler, validatorCompiler, ZodTypeProv
 import { z } from 'zod'
 import { readProcessRoute } from './routes/readProcess'
 import { readPipelineRoute } from './routes/readPipeline'
+import { internalPruneRunsRoute } from './routes/internalPruneRuns'
 import { validateJWT } from './middleware/auth'
 
 async function startApp() {
@@ -76,6 +77,7 @@ async function startApp() {
       '/api/processes',
       '/api/pipeline',
       '/api/cache-pdf',
+      '/api/internal',
     ];
     
     // Check if this is a public endpoint
@@ -86,10 +88,13 @@ async function startApp() {
       url.startsWith(pattern + '/') || url === pattern
     );
     
+    // Internal service routes use x-internal-service-token (not JWT)
+    const isInternalServicePath = url.startsWith('/api/internal');
+
     // Apply JWT validation only to write operations on protected routes
     // Skip in development to allow local testing without a JWT secret
     const isDevelopment = process.env.NODE_ENV === 'development';
-    if (!isDevelopment && isWriteOperation && isProtectedRoute && !isPublicPath) {
+    if (!isDevelopment && isWriteOperation && isProtectedRoute && !isPublicPath && !isInternalServicePath) {
       await validateJWT(request, reply);
     }
   });
@@ -144,6 +149,10 @@ async function startApp() {
 
   app.register(readPipelineRoute, {
     prefix: '/api/pipeline',
+  })
+
+  app.register(internalPruneRunsRoute, {
+    prefix: '/api/internal',
   })
 
   await app.register(scalarPlugin, {
