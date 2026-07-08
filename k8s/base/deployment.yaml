@@ -70,3 +70,8 @@ spec:
                 secretKeyRef:
                   name: env
                   key: NODE_ENV
+            - name: INTERNAL_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: env
+                  key: INTERNAL_SERVICE_TOKEN
