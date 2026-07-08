@@ -7,14 +7,13 @@ export async function validateInternalServiceToken(
 ): Promise<void> {
   const expected = apiConfig.internalServiceToken;
   if (!expected) {
-    reply.status(503).send({
+    return reply.status(503).send({
       error: "Internal service authentication is not configured",
     });
-    return;
   }
 
   const provided = request.headers["x-internal-service-token"];
   if (typeof provided !== "string" || provided !== expected) {
-    reply.status(401).send({ error: "Unauthorized" });
+    return reply.status(401).send({ error: "Unauthorized" });
   }
 }
