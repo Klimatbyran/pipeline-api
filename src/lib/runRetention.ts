@@ -122,6 +122,7 @@ export function runMatchesCompanyFilter(
 
 export type SelectRunsToPruneOptions = {
   keepCount?: number;
+  /** When set, limits pruning to one company (manual script only). Default is global. */
   companyName?: string;
   excludeThreadId?: string;
 };
@@ -131,41 +132,31 @@ export function selectRunsToPrune(
   options: SelectRunsToPruneOptions = {},
 ): PruneSelectionResult {
   const keepCount = options.keepCount ?? DEFAULT_KEEP_RUN_COUNT;
-  const filtered = options.companyName
-    ? runs.filter((run) =>
-        runMatchesCompanyFilter(run, options.companyName!),
-      )
-    : runs;
-
-  const byCompany = new Map<string, RunSummary[]>();
-  for (const run of filtered) {
-    const list = byCompany.get(run.companyKey) ?? [];
-    list.push(run);
-    byCompany.set(run.companyKey, list);
-  }
-
   const threadIdsToPrune = new Set<string>();
   const protectedThreadIds = new Set<string>();
   let skippedLiveRuns = 0;
 
-  for (const companyRuns of byCompany.values()) {
-    const sorted = [...companyRuns].sort((a, b) => b.sortMs - a.sortMs);
-    const protectedForCompany = new Set(
-      sorted.slice(0, keepCount).map((run) => run.threadId),
+  if (options.companyName) {
+    const filtered = runs.filter((run) =>
+      runMatchesCompanyFilter(run, options.companyName!),
     );
-    for (const threadId of protectedForCompany) {
-      protectedThreadIds.add(threadId);
-    }
-
-    for (const run of sorted) {
-      if (run.hasLiveJob) {
-        skippedLiveRuns += 1;
-        continue;
-      }
-      if (run.threadId === options.excludeThreadId) continue;
-      if (protectedForCompany.has(run.threadId)) continue;
-      threadIdsToPrune.add(run.threadId);
-    }
+    pruneRunGroup(filtered, keepCount, options, {
+      threadIdsToPrune,
+      protectedThreadIds,
+      skippedLiveRunsRef: () => skippedLiveRuns,
+      setSkippedLiveRuns: (n) => {
+        skippedLiveRuns = n;
+      },
+    });
+  } else {
+    pruneRunGroup(runs, keepCount, options, {
+      threadIdsToPrune,
+      protectedThreadIds,
+      skippedLiveRunsRef: () => skippedLiveRuns,
+      setSkippedLiveRuns: (n) => {
+        skippedLiveRuns = n;
+      },
+    });
   }
 
   const jobRefsToRemove: RetentionJobRef[] = [];
@@ -180,4 +171,37 @@ export function selectRunsToPrune(
     skippedLiveRuns,
     jobRefsToRemove,
   };
+}
+
+function pruneRunGroup(
+  runs: RunSummary[],
+  keepCount: number,
+  options: SelectRunsToPruneOptions,
+  state: {
+    threadIdsToPrune: Set<string>;
+    protectedThreadIds: Set<string>;
+    skippedLiveRunsRef: () => number;
+    setSkippedLiveRuns: (n: number) => void;
+  },
+): void {
+  const sorted = [...runs].sort((a, b) => b.sortMs - a.sortMs);
+  const protectedForGroup = new Set(
+    sorted.slice(0, keepCount).map((run) => run.threadId),
+  );
+
+  for (const threadId of protectedForGroup) {
+    state.protectedThreadIds.add(threadId);
+  }
+
+  let skippedLiveRuns = state.skippedLiveRunsRef();
+  for (const run of sorted) {
+    if (run.hasLiveJob) {
+      skippedLiveRuns += 1;
+      continue;
+    }
+    if (run.threadId === options.excludeThreadId) continue;
+    if (protectedForGroup.has(run.threadId)) continue;
+    state.threadIdsToPrune.add(run.threadId);
+  }
+  state.setSkippedLiveRuns(skippedLiveRuns);
 }

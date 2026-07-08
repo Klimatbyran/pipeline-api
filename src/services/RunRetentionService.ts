@@ -74,13 +74,12 @@ export class RunRetentionService {
     });
 
     const companiesProcessed = new Set(
-      runs
-        .filter((run) =>
-          options.companyName
-            ? runMatchesCompanyFilter(run, options.companyName)
-            : true,
-        )
-        .map((run) => run.companyKey),
+      (options.companyName
+        ? runs.filter((run) =>
+            runMatchesCompanyFilter(run, options.companyName!),
+          )
+        : runs
+      ).map((run) => run.companyKey),
     ).size;
 
     let jobsRemoved = 0;

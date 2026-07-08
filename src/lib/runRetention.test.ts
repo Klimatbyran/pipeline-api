@@ -34,14 +34,14 @@ describe("runRetention", () => {
     assert.equal(key, "acme ab");
   });
 
-  it("merges runs with different company name casing", () => {
+  it("keeps 15 newest runs globally across companies", () => {
     const runs: RetentionJobRef[] = [];
-    for (let i = 1; i <= 16; i++) {
+    for (let i = 1; i <= 18; i++) {
       runs.push(
         job({
           id: `job-${i}`,
           threadId: `thread-${i}`,
-          companyName: i % 2 === 0 ? "ACME AB" : "Acme AB",
+          companyName: `Company ${i}`,
           status: "completed",
           finishedOn: i * 1000,
           timestamp: i * 1000,
@@ -50,26 +50,20 @@ describe("runRetention", () => {
     }
 
     const summaries = buildRunSummaries(runs);
-    const selection = selectRunsToPrune(summaries, {
-      companyName: "acme ab",
-      keepCount: 15,
-    });
+    const selection = selectRunsToPrune(summaries, { keepCount: 15 });
 
-    assert.equal(selection.threadIdsToPrune.length, 1);
+    assert.equal(selection.protectedThreadIds.length, 15);
+    assert.equal(selection.threadIdsToPrune.length, 3);
+    assert.ok(selection.threadIdsToPrune.includes("thread-1"));
+    assert.ok(selection.threadIdsToPrune.includes("thread-2"));
+    assert.ok(selection.threadIdsToPrune.includes("thread-3"));
+    assert.ok(!selection.threadIdsToPrune.includes("thread-18"));
   });
 
-  it("scoped prune finds runs by company name on any job", () => {
+  it("scoped prune by company name only affects that company", () => {
     const summaries = buildRunSummaries([
       job({
         id: "1",
-        threadId: "run-1",
-        companyId: "co-1",
-        status: "completed",
-        finishedOn: 100,
-        timestamp: 100,
-      }),
-      job({
-        id: "2",
         threadId: "run-1",
         companyName: "Acme AB",
         status: "completed",
@@ -77,7 +71,7 @@ describe("runRetention", () => {
         timestamp: 100,
       }),
       job({
-        id: "3",
+        id: "2",
         threadId: "run-2",
         companyName: "Other Co",
         status: "completed",
@@ -92,35 +86,6 @@ describe("runRetention", () => {
     });
 
     assert.deepEqual(selection.threadIdsToPrune, ["run-1"]);
-  });
-
-  it("keeps 15 newest runs and prunes older terminal runs for a company", () => {
-    const runs: RetentionJobRef[] = [];
-    for (let i = 1; i <= 18; i++) {
-      runs.push(
-        job({
-          id: `job-${i}`,
-          threadId: `thread-${i}`,
-          companyName: "Acme AB",
-          status: "completed",
-          finishedOn: i * 1000,
-          timestamp: i * 1000,
-        }),
-      );
-    }
-
-    const summaries = buildRunSummaries(runs);
-    const selection = selectRunsToPrune(summaries, {
-      companyName: "Acme AB",
-      keepCount: 15,
-    });
-
-    assert.equal(selection.protectedThreadIds.length, 15);
-    assert.equal(selection.threadIdsToPrune.length, 3);
-    assert.ok(selection.threadIdsToPrune.includes("thread-1"));
-    assert.ok(selection.threadIdsToPrune.includes("thread-2"));
-    assert.ok(selection.threadIdsToPrune.includes("thread-3"));
-    assert.ok(!selection.threadIdsToPrune.includes("thread-18"));
   });
 
   it("never prunes runs with any live job", () => {
@@ -143,17 +108,14 @@ describe("runRetention", () => {
       job({
         id: "old-1",
         threadId: "old-run",
-        companyName: "Acme AB",
+        companyName: "Beta AB",
         status: "completed",
         finishedOn: 50,
         timestamp: 50,
       }),
     ]);
 
-    const selection = selectRunsToPrune(summaries, {
-      companyName: "Acme AB",
-      keepCount: 1,
-    });
+    const selection = selectRunsToPrune(summaries, { keepCount: 1 });
 
     assert.equal(selection.skippedLiveRuns, 1);
     assert.ok(!selection.threadIdsToPrune.includes("live-run"));
@@ -173,7 +135,7 @@ describe("runRetention", () => {
       job({
         id: "old",
         threadId: "old-run",
-        companyName: "Acme AB",
+        companyName: "Beta AB",
         status: "completed",
         finishedOn: 2000,
         timestamp: 2000,
@@ -181,7 +143,6 @@ describe("runRetention", () => {
     ]);
 
     const selection = selectRunsToPrune(summaries, {
-      companyName: "Acme AB",
       keepCount: 1,
       excludeThreadId: "new-run",
     });
