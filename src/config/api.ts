@@ -8,6 +8,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(3001),
   NODE_ENV: z.enum(['development', 'staging', 'production']).default('production'),
   JWT_SECRET: z.string().optional().describe('Required only for write operations (POST, PUT, PATCH, DELETE). GET requests work without it.'),
+  INTERNAL_SERVICE_TOKEN: z.string().optional().describe('Shared secret for internal service-to-service calls (e.g. garbo prune hook).'),
 })
 
 const env = envSchema.parse(process.env);
@@ -36,6 +37,7 @@ const apiConfig = {
   baseURL: env.API_BASE_URL,
   port: env.PORT,
   jwtSecret: env.JWT_SECRET, // Optional - only needed for write operations
+  internalServiceToken: env.INTERNAL_SERVICE_TOKEN,
 }
 
 export default apiConfig
