@@ -57,6 +57,34 @@ export class RunRetentionService {
     return new RunRetentionService(queueService);
   }
 
+  private async removeJobRef(ref: RetentionJobRef): Promise<boolean> {
+    try {
+      const queue = await this.queueService.getQueue(ref.queue);
+      const job = await queue.getJob(ref.id);
+      if (!job) return false;
+      await job.remove();
+      return true;
+    } catch (error) {
+      console.error("[RunRetentionService] failed to remove job", {
+        queue: ref.queue,
+        jobId: ref.id,
+        threadId: ref.threadId,
+        error,
+      });
+      return false;
+    }
+  }
+
+  private async jobRefStillExists(ref: RetentionJobRef): Promise<boolean> {
+    try {
+      const queue = await this.queueService.getQueue(ref.queue);
+      const job = await queue.getJob(ref.id);
+      return job != null;
+    } catch {
+      return true;
+    }
+  }
+
   public async pruneRuns(options: PruneRunsOptions = {}): Promise<PruneRunsResult> {
     const keepCount = options.keepCount ?? DEFAULT_KEEP_RUN_COUNT;
     const dryRun = options.dryRun ?? false;
@@ -82,22 +110,48 @@ export class RunRetentionService {
       ).map((run) => run.companyKey),
     ).size;
 
+    const refsByThreadId = new Map<string, RetentionJobRef[]>();
+    for (const ref of selection.jobRefsToRemove) {
+      const list = refsByThreadId.get(ref.threadId) ?? [];
+      list.push(ref);
+      refsByThreadId.set(ref.threadId, list);
+    }
+
     let jobsRemoved = 0;
+    const prunedThreadIds: string[] = [];
+    const partialPruneThreadIds: string[] = [];
+
     if (!dryRun) {
-      for (const ref of selection.jobRefsToRemove) {
-        try {
-          const queue = await this.queueService.getQueue(ref.queue);
-          const job = await queue.getJob(ref.id);
-          if (!job) continue;
-          await job.remove();
-          jobsRemoved += 1;
-        } catch (error) {
-          console.error("[RunRetentionService] failed to remove job", {
-            queue: ref.queue,
-            jobId: ref.id,
-            threadId: ref.threadId,
-            error,
-          });
+      for (const threadId of selection.threadIdsToPrune) {
+        const refs = refsByThreadId.get(threadId) ?? [];
+        const pending = [...refs];
+
+        for (const ref of pending) {
+          if (await this.removeJobRef(ref)) {
+            jobsRemoved += 1;
+          }
+        }
+
+        const stillPending: RetentionJobRef[] = [];
+        for (const ref of pending) {
+          if (await this.jobRefStillExists(ref)) {
+            stillPending.push(ref);
+          }
+        }
+
+        for (const ref of stillPending) {
+          if (await this.removeJobRef(ref)) {
+            jobsRemoved += 1;
+          }
+        }
+
+        const hasRemaining = await Promise.all(
+          refs.map((ref) => this.jobRefStillExists(ref)),
+        );
+        if (hasRemaining.some(Boolean)) {
+          partialPruneThreadIds.push(threadId);
+        } else {
+          prunedThreadIds.push(threadId);
         }
       }
     }
@@ -108,18 +162,25 @@ export class RunRetentionService {
       excludeThreadId: options.excludeThreadId ?? null,
       keepCount,
       companiesProcessed,
-      runsPruned: selection.threadIdsToPrune.length,
+      runsPruned: dryRun
+        ? selection.threadIdsToPrune.length
+        : prunedThreadIds.length,
+      partialPruneThreadIds,
       jobsRemoved: dryRun ? selection.jobRefsToRemove.length : jobsRemoved,
       skippedLiveRuns: selection.skippedLiveRuns,
     });
 
     return {
       companiesProcessed,
-      runsPruned: selection.threadIdsToPrune.length,
+      runsPruned: dryRun
+        ? selection.threadIdsToPrune.length
+        : prunedThreadIds.length,
       jobsRemoved: dryRun ? 0 : jobsRemoved,
       skippedLiveRuns: selection.skippedLiveRuns,
       protectedThreadIds: selection.protectedThreadIds,
-      prunedThreadIds: selection.threadIdsToPrune,
+      prunedThreadIds: dryRun
+        ? selection.threadIdsToPrune
+        : prunedThreadIds,
       dryRun,
     };
   }
