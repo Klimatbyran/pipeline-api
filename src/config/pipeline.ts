@@ -48,7 +48,7 @@ export const pipeline: Pipeline = [
         id: "extractEmissions",
         name: "Emissions Data",
         next: {
-            target: ["followUpScope12", "followUpScope3", "followUpBiogenic", "followUpEconomy", "followUpGoals", "followUpInitiatives", "followUpIndustryGics", "followUpBaseYear"]
+            target: ["followUpScope12", "followUpScope3", "followUpBiogenic", "followUpEconomy", "followUpGoals", "followUpInitiatives", "followUpIndustryGics", "followUpBaseYear", "followUpCompanyTags", "followUpReportType"]
         }
     },
     {
@@ -112,6 +112,10 @@ export const pipeline: Pipeline = [
         name: "Follow-up Company Tags"
     },
     {
+        id: "followUpReportType",
+        name: "Follow-up Report Type"
+    },
+    {
         id: "followUpBaseYear",
         name: "Follow-up Base Year",
         next: {
@@ -129,7 +133,7 @@ export const pipeline: Pipeline = [
         id: "checkDB",
         name: "DB Check",
         next: {
-            target: ["diffIndustry", "diffGoals", "diffInitiatives", "diffBaseYear", "diffReportingPeriods"]
+            target: ["diffIndustry", "diffGoals", "diffInitiatives", "diffBaseYear", "diffReportingPeriods", "diffTags", "diffReportType"]
         }
     },
     {
@@ -165,6 +169,20 @@ export const pipeline: Pipeline = [
         name: "Financial Years",
         next: {
             target: ["saveToAPI", "sendCompanyLink", "wikipediaUpload"]
+        }
+    },
+    {
+        id: "diffTags",
+        name: "Tags",
+        next: {
+            target: ["saveToAPI", "sendCompanyLink"]
+        }
+    },
+    {
+        id: "diffReportType",
+        name: "Report Type",
+        next: {
+            target: ["saveToAPI", "sendCompanyLink"]
         }
     },
     {
