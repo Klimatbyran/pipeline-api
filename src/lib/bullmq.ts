@@ -63,10 +63,8 @@ export const QUEUE_NAMES = {
 };
 
 export const DEFAULT_PIPELINE_JOB_OPTIONS = {
-  // Overflow safety net only — run-level pruning is authoritative.
-  removeOnComplete: {
-    count: 30,
-  },
+  // Eviction is run-level (RunRetentionService / prune-runs), not per-queue.
+  removeOnComplete: false,
   removeOnFail: {
     age: 1_209_600, // 2 weeks in seconds
   },
