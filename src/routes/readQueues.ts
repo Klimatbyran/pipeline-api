@@ -1,16 +1,16 @@
-import { FastifyInstance, FastifyRequest } from "fastify";
-import { randomUUID } from "crypto";
-import { QueueService } from "../services/QueueService";
-import { AddJobBody, BaseJob } from "../schemas/types";
+import { FastifyInstance, FastifyRequest } from 'fastify'
+import { randomUUID } from 'crypto'
+import { QueueService } from '../services/QueueService'
+import { AddJobBody, BaseJob } from '../schemas/types'
 import {
   error404ResponseSchema,
   queueAddJobResponseSchema,
   queueJobResponseSchema,
   queueResponseSchema,
   queueStatsResponseSchema,
-} from "../schemas/response";
-import { STATUS, QUEUE_NAMES } from "../lib/bullmq";
-import { JobType } from "bullmq";
+} from '../schemas/response'
+import { STATUS, QUEUE_NAMES } from '../lib/bullmq'
+import { JobType } from 'bullmq'
 import {
   addQueueJobBodySchema,
   readQueueJobPathParamsSchema,
@@ -20,18 +20,19 @@ import {
   rerunAndSaveQueueJobBodySchema,
   rerunJobsByWorkerBodySchema,
   rerunQueueJobBodySchema,
-} from "../schemas/request";
-import { z } from "zod";
+} from '../schemas/request'
+import { z } from 'zod'
 import {
   type PdfUploadResult,
   uploadPdfAndGetUrls,
-} from "../services/S3UploadService";
-import { isS3Configured } from "../config/s3";
+} from '../services/S3UploadService'
+import { isS3Configured } from '../config/s3'
 import {
   cachePdfFromUrl,
   type PdfCacheEntry,
-} from "../services/PdfCacheService";
-import { withUrlReportYearForDisplay } from "../lib/documentReportYear";
+} from '../services/PdfCacheService'
+import { withUrlReportYearForDisplay } from '../lib/documentReportYear'
+import { mergeJobDataWithCompanyContext } from '../lib/pipelineCompanyJobData'
 
 const pdfUploadMetaSchema = z.object({
   filename: z.string(),
@@ -41,7 +42,7 @@ const pdfUploadMetaSchema = z.object({
   sha256: z.string(),
   reusedExisting: z.boolean(),
   uploaded: z.boolean(),
-});
+})
 
 const pdfCacheEntrySchema = z.object({
   env: z.string(),
@@ -54,52 +55,52 @@ const pdfCacheEntrySchema = z.object({
   uploaded: z.boolean(),
   fetchedAt: z.string(),
   contentLength: z.number().optional(),
-});
+})
 
 const pdfCacheUrlErrorSchema = z.object({
   url: z.string(),
   error: z.string(),
-});
+})
 
 async function uploadAndEnqueueParsePdfJobs(params: {
-  queueService: QueueService;
-  files: { buffer: Buffer; filename: string }[];
+  queueService: QueueService
+  files: { buffer: Buffer; filename: string }[]
   options: {
-    autoApprove?: boolean;
-    batchId?: string;
-    forceReindex?: boolean;
-    replaceAllEmissions?: boolean;
-    runOnly?: string[];
-    tags?: string[];
-  };
-  request: FastifyRequest;
-  fileTooLargeMessage: string;
+    autoApprove?: boolean
+    batchId?: string
+    forceReindex?: boolean
+    replaceAllEmissions?: boolean
+    runOnly?: string[]
+    tags?: string[]
+  }
+  request: FastifyRequest
+  fileTooLargeMessage: string
 }): Promise<
   | {
-      ok: true;
-      jobs: BaseJob[];
-      uploads: Array<{ filename: string } & PdfUploadResult>;
+      ok: true
+      jobs: BaseJob[]
+      uploads: Array<{ filename: string } & PdfUploadResult>
     }
   | { ok: false; status: 413 | 500; error: string }
 > {
-  const { queueService, files, options, request, fileTooLargeMessage } = params;
+  const { queueService, files, options, request, fileTooLargeMessage } = params
 
-  const addedJobs: BaseJob[] = [];
-  const uploads: Array<{ filename: string } & PdfUploadResult> = [];
+  const addedJobs: BaseJob[] = []
+  const uploads: Array<{ filename: string } & PdfUploadResult> = []
   for (const { buffer, filename } of files) {
-    let upload: PdfUploadResult;
+    let upload: PdfUploadResult
     try {
-      upload = await uploadPdfAndGetUrls(buffer, filename);
+      upload = await uploadPdfAndGetUrls(buffer, filename)
     } catch (err: any) {
-      request.log.warn({ err, filename }, "S3 upload failed");
-      const isTooLarge = err?.message?.includes("too large") ?? false;
+      request.log.warn({ err, filename }, 'S3 upload failed')
+      const isTooLarge = err?.message?.includes('too large') ?? false
       return {
         ok: false,
         status: isTooLarge ? 413 : 500,
         error: isTooLarge
           ? fileTooLargeMessage
-          : (err?.message ?? "Failed to upload PDF to storage."),
-      };
+          : (err?.message ?? 'Failed to upload PDF to storage.'),
+      }
     }
 
     request.log.info(
@@ -109,10 +110,10 @@ async function uploadAndEnqueueParsePdfJobs(params: {
         reusedExisting: upload.reusedExisting,
         uploaded: upload.uploaded,
       },
-      "S3 upload succeeded, adding to BullMQ",
-    );
-    uploads.push({ filename, ...upload });
-    const perUrlThreadId = randomUUID();
+      'S3 upload succeeded, adding to BullMQ'
+    )
+    uploads.push({ filename, ...upload })
+    const perUrlThreadId = randomUUID()
     const addedJob = await queueService.addJob(
       QUEUE_NAMES.PARSE_PDF,
       upload.publicUrl,
@@ -136,103 +137,103 @@ async function uploadAndEnqueueParsePdfJobs(params: {
               uploaded: upload.uploaded,
             },
           },
-          `uploaded:${filename}`,
+          `uploaded:${filename}`
         ),
-      },
-    );
+      }
+    )
     request.log.info(
       { filename, jobId: addedJob.id },
-      "BullMQ job added successfully",
-    );
-    addedJobs.push(addedJob);
+      'BullMQ job added successfully'
+    )
+    addedJobs.push(addedJob)
   }
 
-  return { ok: true, jobs: addedJobs, uploads };
+  return { ok: true, jobs: addedJobs, uploads }
 }
 
 async function parseParsePdfUpload(request: FastifyRequest): Promise<{
   options: {
-    autoApprove?: boolean;
-    batchId?: string;
-    forceReindex?: boolean;
-    replaceAllEmissions?: boolean;
-    runOnly?: string[];
-    tags?: string[];
-  };
-  files: { buffer: Buffer; filename: string }[];
+    autoApprove?: boolean
+    batchId?: string
+    forceReindex?: boolean
+    replaceAllEmissions?: boolean
+    runOnly?: string[]
+    tags?: string[]
+  }
+  files: { buffer: Buffer; filename: string }[]
 }> {
   const options: {
-    autoApprove?: boolean;
-    batchId?: string;
-    forceReindex?: boolean;
-    replaceAllEmissions?: boolean;
-    runOnly?: string[];
-    tags?: string[];
-  } = {};
+    autoApprove?: boolean
+    batchId?: string
+    forceReindex?: boolean
+    replaceAllEmissions?: boolean
+    runOnly?: string[]
+    tags?: string[]
+  } = {}
 
-  const files: { buffer: Buffer; filename: string }[] = [];
+  const files: { buffer: Buffer; filename: string }[] = []
 
-  const parts = (request as any).parts();
+  const parts = (request as any).parts()
   for await (const part of parts) {
-    if (part.type === "field") {
-      const raw = part.value;
-      const value = typeof raw === "string" ? raw : String(raw ?? "");
+    if (part.type === 'field') {
+      const raw = part.value
+      const value = typeof raw === 'string' ? raw : String(raw ?? '')
 
       switch (part.fieldname) {
-        case "autoApprove":
-          options.autoApprove = value === "true" || value === "1";
-          break;
-        case "batchId": {
+        case 'autoApprove':
+          options.autoApprove = value === 'true' || value === '1'
+          break
+        case 'batchId': {
           const s =
-            typeof raw === "string"
+            typeof raw === 'string'
               ? raw
               : raw == null
                 ? undefined
-                : String(raw);
-          options.batchId = s ?? undefined;
-          break;
+                : String(raw)
+          options.batchId = s ?? undefined
+          break
         }
-        case "forceReindex":
-          options.forceReindex = value === "true" || value === "1";
-          break;
-        case "replaceAllEmissions":
-          options.replaceAllEmissions = value === "true" || value === "1";
-          break;
-        case "runOnly":
+        case 'forceReindex':
+          options.forceReindex = value === 'true' || value === '1'
+          break
+        case 'replaceAllEmissions':
+          options.replaceAllEmissions = value === 'true' || value === '1'
+          break
+        case 'runOnly':
           try {
-            options.runOnly = value ? JSON.parse(value) : undefined;
+            options.runOnly = value ? JSON.parse(value) : undefined
           } catch {
             /* ignore invalid JSON */
           }
-          break;
-        case "tags":
+          break
+        case 'tags':
           try {
-            options.tags = value ? JSON.parse(value) : undefined;
+            options.tags = value ? JSON.parse(value) : undefined
           } catch {
             /* ignore invalid JSON */
           }
-          break;
+          break
       }
-    } else if (part.type === "file") {
-      const buffer = await part.toBuffer();
-      const filename = part.filename ?? "report.pdf";
+    } else if (part.type === 'file') {
+      const buffer = await part.toBuffer()
+      const filename = part.filename ?? 'report.pdf'
       if (buffer.length > 0) {
-        files.push({ buffer, filename });
+        files.push({ buffer, filename })
       }
     }
   }
 
-  return { options, files };
+  return { options, files }
 }
 
 export async function readQueuesRoute(app: FastifyInstance) {
   app.get(
-    "/",
+    '/',
     {
       schema: {
-        summary: "Get jobs",
-        description: "",
-        tags: ["Queues"],
+        summary: 'Get jobs',
+        description: '',
+        tags: ['Queues'],
         querystring: readQueueQueryStringSchema,
         response: {
           200: queueResponseSchema,
@@ -241,24 +242,24 @@ export async function readQueuesRoute(app: FastifyInstance) {
     },
     async (
       request: FastifyRequest<{
-        Querystring: { status?: STATUS };
+        Querystring: { status?: STATUS }
       }>,
-      reply,
+      reply
     ) => {
-      const { status } = request.query;
-      const queueService = await QueueService.getQueueService();
-      const jobs = await queueService.getJobs([], status);
-      return reply.send(jobs);
-    },
-  );
+      const { status } = request.query
+      const queueService = await QueueService.getQueueService()
+      const jobs = await queueService.getJobs([], status)
+      return reply.send(jobs)
+    }
+  )
 
   app.get(
-    "/:name",
+    '/:name',
     {
       schema: {
-        summary: "Get jobs in requested queue",
-        description: "",
-        tags: ["Queues"],
+        summary: 'Get jobs in requested queue',
+        description: '',
+        tags: ['Queues'],
         params: readQueuePathParamsSchema,
         querystring: readQueueQueryStringSchema,
         response: {
@@ -268,29 +269,29 @@ export async function readQueuesRoute(app: FastifyInstance) {
     },
     async (
       request: FastifyRequest<{
-        Params: { name: string };
-        Querystring: { status?: STATUS };
+        Params: { name: string }
+        Querystring: { status?: STATUS }
       }>,
-      reply,
+      reply
     ) => {
-      const { name } = request.params;
-      const { status } = request.query;
-      const queueService = await QueueService.getQueueService();
-      const jobs = await queueService.getJobs([name], status);
-      return reply.send(jobs);
-    },
-  );
+      const { name } = request.params
+      const { status } = request.query
+      const queueService = await QueueService.getQueueService()
+      const jobs = await queueService.getJobs([name], status)
+      return reply.send(jobs)
+    }
+  )
 
   // File upload for parsePdf: must be registered before POST /:name so path parsePdf/upload is matched
   app.post(
-    "/parsePdf/upload",
+    '/parsePdf/upload',
     {
       schema: {
-        summary: "Upload PDFs and add parsePdf jobs",
+        summary: 'Upload PDFs and add parsePdf jobs',
         description:
-          "Accept multipart/form-data with PDF files and optional options (autoApprove, batchId, forceReindex, replaceAllEmissions, runOnly, tags). Same job shape as URL-based POST /queues/parsePdf. Requires S3_BUCKET to be set.",
-        tags: ["Queues"],
-        consumes: ["multipart/form-data"],
+          'Accept multipart/form-data with PDF files and optional options (autoApprove, batchId, forceReindex, replaceAllEmissions, runOnly, tags). Same job shape as URL-based POST /queues/parsePdf. Requires S3_BUCKET to be set.',
+        tags: ['Queues'],
+        consumes: ['multipart/form-data'],
         response: {
           200: z.object({
             jobs: queueAddJobResponseSchema,
@@ -307,38 +308,36 @@ export async function readQueuesRoute(app: FastifyInstance) {
       if (!isS3Configured()) {
         return reply.status(503).send({
           error:
-            "PDF upload is not configured. Set S3_BUCKET in the environment.",
-        });
+            'PDF upload is not configured. Set S3_BUCKET in the environment.',
+        })
       }
       const FILE_TOO_LARGE_MSG =
-        "File too large. Maximum size is 400 MB per file.";
-      const queueService = await QueueService.getQueueService();
+        'File too large. Maximum size is 400 MB per file.'
+      const queueService = await QueueService.getQueueService()
       let options: {
-        autoApprove?: boolean;
-        batchId?: string;
-        forceReindex?: boolean;
-        replaceAllEmissions?: boolean;
-        runOnly?: string[];
-        tags?: string[];
-      };
-      let files: { buffer: Buffer; filename: string }[];
+        autoApprove?: boolean
+        batchId?: string
+        forceReindex?: boolean
+        replaceAllEmissions?: boolean
+        runOnly?: string[]
+        tags?: string[]
+      }
+      let files: { buffer: Buffer; filename: string }[]
 
       try {
-        ({ options, files } = await parseParsePdfUpload(request));
+        ;({ options, files } = await parseParsePdfUpload(request))
       } catch (err: any) {
-        if (err?.statusCode === 413 || err?.code === "FST_REQ_FILE_TOO_LARGE") {
-          return reply.status(413).send({ error: FILE_TOO_LARGE_MSG });
+        if (err?.statusCode === 413 || err?.code === 'FST_REQ_FILE_TOO_LARGE') {
+          return reply.status(413).send({ error: FILE_TOO_LARGE_MSG })
         }
-        throw err;
+        throw err
       }
 
       if (files.length === 0) {
-        return reply
-          .status(400)
-          .send({
-            error:
-              "At least one PDF file is required (multipart field name: file or files).",
-          });
+        return reply.status(400).send({
+          error:
+            'At least one PDF file is required (multipart field name: file or files).',
+        })
       }
 
       const uploadResult = await uploadAndEnqueueParsePdfJobs({
@@ -347,36 +346,36 @@ export async function readQueuesRoute(app: FastifyInstance) {
         options,
         request,
         fileTooLargeMessage: FILE_TOO_LARGE_MSG,
-      });
+      })
       if (!uploadResult.ok) {
         return reply
           .status(uploadResult.status)
-          .send({ error: uploadResult.error });
+          .send({ error: uploadResult.error })
       }
 
       app.log.info(
         {
-          queue: "parsePdf",
+          queue: 'parsePdf',
           uploadCount: files.length,
           ...options,
         },
-        "ParsePdf upload request completed",
-      );
+        'ParsePdf upload request completed'
+      )
       return reply.send({
         jobs: uploadResult.jobs,
         uploads: uploadResult.uploads,
-      });
-    },
-  );
+      })
+    }
+  )
 
   app.post(
-    "/:name",
+    '/:name',
     {
       schema: {
-        summary: "Add job to a queue",
+        summary: 'Add job to a queue',
         description:
-          "Enqueue one or more URLs into the specified queue. Optional flags include autoApprove, replaceAllEmissions and forceReindex (alias: force-reindex). For parsePdf only: set cachePdf=true to cache PDFs to S3 before enqueueing so workers read from storage.",
-        tags: ["Queues"],
+          'Enqueue one or more URLs into the specified queue. Optional flags include autoApprove, replaceAllEmissions and forceReindex (alias: force-reindex). For parsePdf only: set cachePdf=true to cache PDFs to S3 before enqueueing so workers read from storage.',
+        tags: ['Queues'],
         params: readQueuePathParamsSchema,
         body: addQueueJobBodySchema,
         response: {
@@ -397,21 +396,19 @@ export async function readQueuesRoute(app: FastifyInstance) {
     },
     async (
       request: FastifyRequest<{
-        Params: { name: string };
-        Body: AddJobBody;
+        Params: { name: string }
+        Body: AddJobBody
       }>,
-      reply,
+      reply
     ) => {
-      const { name } = request.params;
+      const { name } = request.params
       const resolvedName = Object.values(QUEUE_NAMES).find(
-        (q) => q.toLowerCase() === name.toLowerCase(),
-      );
+        (q) => q.toLowerCase() === name.toLowerCase()
+      )
       if (!resolvedName) {
-        return reply
-          .status(400)
-          .send({
-            error: `Unknown queue '${name}'. Valid queues: ${Object.values(QUEUE_NAMES).join(", ")}`,
-          });
+        return reply.status(400).send({
+          error: `Unknown queue '${name}'. Valid queues: ${Object.values(QUEUE_NAMES).join(', ')}`,
+        })
       }
       const {
         urls,
@@ -423,7 +420,10 @@ export async function readQueuesRoute(app: FastifyInstance) {
         tags,
         cachePdf,
         callbackUrl,
-      } = request.body;
+        pipelineCompany,
+        urlContexts,
+      } = request.body
+      const companyContextBody = { pipelineCompany, urlContexts }
       // Log enqueue request (sanitized)
       app.log.info(
         {
@@ -437,24 +437,24 @@ export async function readQueuesRoute(app: FastifyInstance) {
           tags: tags ?? undefined,
           cachePdf: !!cachePdf,
         },
-        "Enqueue request received",
-      );
-      const queueService = await QueueService.getQueueService();
-      const addedJobs: BaseJob[] = [];
-      const cached: PdfCacheEntry[] = [];
-      const cacheErrors: Array<{ url: string; error: string }> = [];
+        'Enqueue request received'
+      )
+      const queueService = await QueueService.getQueueService()
+      const addedJobs: BaseJob[] = []
+      const cached: PdfCacheEntry[] = []
+      const cacheErrors: Array<{ url: string; error: string }> = []
 
       for (const url of urls) {
         if (resolvedName === QUEUE_NAMES.PARSE_PDF && cachePdf) {
           if (!isS3Configured()) {
             return reply.status(503).send({
               error:
-                "PDF caching is not configured. Set S3_BUCKET in the environment.",
-            });
+                'PDF caching is not configured. Set S3_BUCKET in the environment.',
+            })
           }
           try {
-            const entry = await cachePdfFromUrl(url);
-            const perUrlThreadId = randomUUID();
+            const entry = await cachePdfFromUrl(url)
+            const perUrlThreadId = randomUUID()
             const addedJob = await queueService.addJob(
               resolvedName,
               entry.publicUrl,
@@ -467,34 +467,38 @@ export async function readQueuesRoute(app: FastifyInstance) {
                 batchId,
                 tags,
                 data: withUrlReportYearForDisplay(
-                  {
-                    sourceUrl: url,
-                    pdfCache: {
-                      sha256: entry.sha256,
-                      bucket: entry.bucket,
-                      key: entry.key,
-                      publicUrl: entry.publicUrl,
-                      reusedExisting: entry.reusedExisting,
-                      uploaded: entry.uploaded,
-                      fetchedAt: entry.fetchedAt,
+                  mergeJobDataWithCompanyContext(
+                    {
+                      sourceUrl: url,
+                      pdfCache: {
+                        sha256: entry.sha256,
+                        bucket: entry.bucket,
+                        key: entry.key,
+                        publicUrl: entry.publicUrl,
+                        reusedExisting: entry.reusedExisting,
+                        uploaded: entry.uploaded,
+                        fetchedAt: entry.fetchedAt,
+                      },
                     },
-                  },
-                  url,
+                    url,
+                    companyContextBody
+                  ),
+                  url
                 ),
-              },
-            );
-            addedJobs.push(addedJob);
-            cached.push(entry);
+              }
+            )
+            addedJobs.push(addedJob)
+            cached.push(entry)
           } catch (err: any) {
             const message = err?.message
               ? String(err.message)
-              : "Failed to cache or enqueue PDF";
-            request.log.warn({ err, url }, "parsePdf cachePdf failed for URL");
-            cacheErrors.push({ url, error: message });
+              : 'Failed to cache or enqueue PDF'
+            request.log.warn({ err, url }, 'parsePdf cachePdf failed for URL')
+            cacheErrors.push({ url, error: message })
           }
-          continue;
+          continue
         }
-        const perUrlThreadId = randomUUID();
+        const perUrlThreadId = randomUUID()
         const jobOptions = {
           forceReindex,
           threadId: perUrlThreadId,
@@ -505,47 +509,54 @@ export async function readQueuesRoute(app: FastifyInstance) {
           callbackUrl,
           ...(resolvedName === QUEUE_NAMES.PARSE_PDF
             ? {
-                data: withUrlReportYearForDisplay({ sourceUrl: url }, url),
+                data: withUrlReportYearForDisplay(
+                  mergeJobDataWithCompanyContext(
+                    { sourceUrl: url },
+                    url,
+                    companyContextBody
+                  ),
+                  url
+                ),
               }
             : {}),
-        };
+        }
         const addedJob = await queueService.addJob(
           resolvedName,
           url,
           autoApprove,
-          jobOptions,
-        );
-        addedJobs.push(addedJob);
+          jobOptions
+        )
+        addedJobs.push(addedJob)
       }
 
       if (resolvedName === QUEUE_NAMES.PARSE_PDF && cachePdf) {
         if (cacheErrors.length > 0 && addedJobs.length === 0) {
           return reply.status(400).send({
             error:
-              "Could not cache or enqueue any PDFs from the provided URLs.",
+              'Could not cache or enqueue any PDFs from the provided URLs.',
             errors: cacheErrors,
-          });
+          })
         }
         if (cached.length > 0 || cacheErrors.length > 0) {
           return reply.send({
             jobs: addedJobs,
             cached,
             ...(cacheErrors.length > 0 ? { errors: cacheErrors } : {}),
-          });
+          })
         }
       }
 
-      return reply.send(addedJobs);
-    },
-  );
+      return reply.send(addedJobs)
+    }
+  )
 
   app.get(
-    "/stats",
+    '/stats',
     {
       schema: {
-        summary: "Get queue job stats",
-        description: "",
-        tags: ["Queues"],
+        summary: 'Get queue job stats',
+        description: '',
+        tags: ['Queues'],
         querystring: readQueueStatsQueryStringSchema,
         response: {
           200: queueStatsResponseSchema,
@@ -554,24 +565,24 @@ export async function readQueuesRoute(app: FastifyInstance) {
     },
     async (
       request: FastifyRequest<{
-        Querystring: { queue?: string };
+        Querystring: { queue?: string }
       }>,
-      reply,
+      reply
     ) => {
-      const { queue } = request.query;
-      const queueService = await QueueService.getQueueService();
-      const stats = await queueService.getQueueStats(queue);
-      return reply.send(stats);
-    },
-  );
+      const { queue } = request.query
+      const queueService = await QueueService.getQueueService()
+      const stats = await queueService.getQueueStats(queue)
+      return reply.send(stats)
+    }
+  )
 
   app.get(
-    "/:name/:id",
+    '/:name/:id',
     {
       schema: {
-        summary: "Get job data",
-        description: "",
-        tags: ["Queues"],
+        summary: 'Get job data',
+        description: '',
+        tags: ['Queues'],
         params: readQueueJobPathParamsSchema,
         response: {
           200: queueJobResponseSchema,
@@ -581,31 +592,31 @@ export async function readQueuesRoute(app: FastifyInstance) {
     },
     async (
       request: FastifyRequest<{
-        Params: { name: string; id: string };
+        Params: { name: string; id: string }
       }>,
-      reply,
+      reply
     ) => {
-      const { name, id } = request.params;
-      const queueService = await QueueService.getQueueService();
+      const { name, id } = request.params
+      const queueService = await QueueService.getQueueService()
       try {
-        const jobData = await queueService.getJobData(name, id);
-        return reply.send(jobData);
+        const jobData = await queueService.getJobData(name, id)
+        return reply.send(jobData)
       } catch (error) {
         return reply
           .status(404)
-          .send({ error: "Job does not exist in this queue" });
+          .send({ error: 'Job does not exist in this queue' })
       }
-    },
-  );
+    }
+  )
 
   app.post(
-    "/:name/:id/rerun",
+    '/:name/:id/rerun',
     {
       schema: {
-        summary: "Re-run a job (resume delayed job or retry failed job)",
+        summary: 'Re-run a job (resume delayed job or retry failed job)',
         description:
-          "Resumes a delayed job (e.g., approval pending) or retries a failed job. Optionally allows updating job data before re-running. For completed jobs, creates a new job with the same data.",
-        tags: ["Queues"],
+          'Resumes a delayed job (e.g., approval pending) or retries a failed job. Optionally allows updating job data before re-running. For completed jobs, creates a new job with the same data.',
+        tags: ['Queues'],
         params: readQueueJobPathParamsSchema,
         body: rerunQueueJobBodySchema,
         response: {
@@ -617,44 +628,44 @@ export async function readQueuesRoute(app: FastifyInstance) {
     },
     async (
       request: FastifyRequest<{
-        Params: { name: string; id: string };
+        Params: { name: string; id: string }
         Body: {
-          data?: Record<string, any>;
-        };
+          data?: Record<string, any>
+        }
       }>,
-      reply,
+      reply
     ) => {
-      const { name, id } = request.params;
-      const { data: dataOverrides } = request.body;
+      const { name, id } = request.params
+      const { data: dataOverrides } = request.body
 
-      const queueService = await QueueService.getQueueService();
+      const queueService = await QueueService.getQueueService()
 
       try {
-        const updatedJob = await queueService.rerunJob(name, id, dataOverrides);
-        return reply.send(updatedJob);
+        const updatedJob = await queueService.rerunJob(name, id, dataOverrides)
+        return reply.send(updatedJob)
       } catch (error: any) {
-        if (error.message?.includes("not found")) {
+        if (error.message?.includes('not found')) {
           return reply
             .status(404)
-            .send({ error: "Job does not exist in this queue" });
+            .send({ error: 'Job does not exist in this queue' })
         }
-        if (error.message?.includes("already")) {
-          return reply.status(400).send({ error: error.message });
+        if (error.message?.includes('already')) {
+          return reply.status(400).send({ error: error.message })
         }
-        app.log.error(error, "Error re-running job");
-        return reply.status(500).send({ error: "Failed to re-run job" });
+        app.log.error(error, 'Error re-running job')
+        return reply.status(500).send({ error: 'Failed to re-run job' })
       }
-    },
-  );
+    }
+  )
 
   app.post(
-    "/:name/:id/rerun-and-save",
+    '/:name/:id/rerun-and-save',
     {
       schema: {
-        summary: "Re-run extract-emissions for this process and save results",
+        summary: 'Re-run extract-emissions for this process and save results',
         description:
-          "From a follow-up job (e.g. scope1, scope2, scope1+2, or scope3), find the original EXTRACT_EMISSIONS job and enqueue a new one with runOnly set to the requested scopes. This overwrites any existing runOnly value.",
-        tags: ["Queues"],
+          'From a follow-up job (e.g. scope1, scope2, scope1+2, or scope3), find the original EXTRACT_EMISSIONS job and enqueue a new one with runOnly set to the requested scopes. This overwrites any existing runOnly value.',
+        tags: ['Queues'],
         params: readQueueJobPathParamsSchema,
         body: rerunAndSaveQueueJobBodySchema,
         response: {
@@ -666,60 +677,60 @@ export async function readQueuesRoute(app: FastifyInstance) {
     },
     async (
       request: FastifyRequest<{
-        Params: { name: string; id: string };
-        Body: { scopes: string[] };
+        Params: { name: string; id: string }
+        Body: { scopes: string[] }
       }>,
-      reply,
+      reply
     ) => {
-      const { name, id } = request.params;
-      const { scopes } = request.body;
+      const { name, id } = request.params
+      const { scopes } = request.body
 
-      const queueService = await QueueService.getQueueService();
+      const queueService = await QueueService.getQueueService()
 
       try {
         const newJob = await queueService.rerunExtractEmissionsFromFollowup(
           name,
           id,
-          scopes,
-        );
-        return reply.send(newJob);
+          scopes
+        )
+        return reply.send(newJob)
       } catch (error: any) {
-        const msg = error?.message ?? "";
+        const msg = error?.message ?? ''
 
-        if (msg.includes("EXTRACT_EMISSIONS job") || msg.includes("threadId")) {
-          return reply.status(404).send({ error: msg });
+        if (msg.includes('EXTRACT_EMISSIONS job') || msg.includes('threadId')) {
+          return reply.status(404).send({ error: msg })
         }
 
-        if (msg.includes("Unknown queue")) {
-          return reply.status(400).send({ error: msg });
+        if (msg.includes('Unknown queue')) {
+          return reply.status(400).send({ error: msg })
         }
 
-        app.log.error(error, "Error in rerun-and-save");
+        app.log.error(error, 'Error in rerun-and-save')
         return reply
           .status(500)
-          .send({ error: "Failed to rerun and save emissions" });
+          .send({ error: 'Failed to rerun and save emissions' })
       }
-    },
-  );
+    }
+  )
 
   app.post(
-    "/rerun-by-worker",
+    '/rerun-by-worker',
     {
       schema: {
         summary:
-          "Re-run all jobs that match a given worker name (using rerun-and-save)",
+          'Re-run all jobs that match a given worker name (using rerun-and-save)',
         description:
-          "Re-runs all jobs across one or more queues whose data.runOnly[] contains the specified worker name using the rerun-and-save approach (finds original EXTRACT_EMISSIONS job and creates new one with specified scopes). Defaults to completed and failed jobs.",
-        tags: ["Queues"],
+          'Re-runs all jobs across one or more queues whose data.runOnly[] contains the specified worker name using the rerun-and-save approach (finds original EXTRACT_EMISSIONS job and creates new one with specified scopes). Defaults to completed and failed jobs.',
+        tags: ['Queues'],
         body: rerunJobsByWorkerBodySchema,
         response: {
           200: z.object({
             totalMatched: z
               .number()
-              .describe("Total number of jobs that matched the criteria"),
+              .describe('Total number of jobs that matched the criteria'),
             perQueue: z
               .record(z.number())
-              .describe("Number of matched jobs per queue name"),
+              .describe('Number of matched jobs per queue name'),
           }),
         },
       },
@@ -727,28 +738,28 @@ export async function readQueuesRoute(app: FastifyInstance) {
     async (
       request: FastifyRequest<{
         Body: {
-          workerName: string;
-          statuses?: JobType[];
-          queues?: string[];
-          limit?: number | "all";
-        };
+          workerName: string
+          statuses?: JobType[]
+          queues?: string[]
+          limit?: number | 'all'
+        }
       }>,
-      reply,
+      reply
     ) => {
-      const { workerName, statuses, queues, limit } = request.body;
+      const { workerName, statuses, queues, limit } = request.body
 
-      const queueService = await QueueService.getQueueService();
+      const queueService = await QueueService.getQueueService()
 
       const resolvedQueues =
-        queues && queues.length > 0 ? queues : Object.values(QUEUE_NAMES);
+        queues && queues.length > 0 ? queues : Object.values(QUEUE_NAMES)
 
       const result = await queueService.rerunJobsByWorkerName(workerName, {
         queueNames: resolvedQueues,
         statuses,
         limit,
-      });
+      })
 
-      return reply.send(result);
-    },
-  );
+      return reply.send(result)
+    }
+  )
 }
