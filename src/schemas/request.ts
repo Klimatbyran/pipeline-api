@@ -1,65 +1,158 @@
-import { string, z } from "zod";
-import { jobStatusSchema } from "./common";
+import { string, z } from 'zod'
+import { jobStatusSchema } from './common'
 
 export const readQueuePathParamsSchema = z.object({
-    name: z.string()
-});
+  name: z.string(),
+})
 
 export const readProcessPathParamsSchema = z.object({
-    id: z.string()
-});
+  id: z.string(),
+})
 
 export const readProcessesQueryStringSchema = z.object({
-    batchId: z.string().optional().describe('Filter to processes in this batch only'),
-});
+  batchId: z
+    .string()
+    .optional()
+    .describe('Filter to processes in this batch only'),
+})
 
 export const readQueueQueryStringSchema = z.object({
-    status: jobStatusSchema.optional()
-});
+  status: jobStatusSchema.optional(),
+})
 
 export const readQueueStatsQueryStringSchema = z.object({
-    queue: string().optional()
-});
+  queue: string().optional(),
+})
 
 export const readQueueJobPathParamsSchema = z.object({
-    name: z.string(),
-    id: z.string()
-});
+  name: z.string(),
+  id: z.string(),
+})
 
 export const readProcessesByCompanyQueryStringSchema = z.object({
-    page: z.coerce.number().int().min(1).optional(),
-    pageSize: z.coerce.number().int().min(1).max(500).optional(),
-    batchId: z.string().optional().describe('Filter to processes (reports) in this batch only'),
-});
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(500).optional(),
+  batchId: z
+    .string()
+    .optional()
+    .describe('Filter to processes (reports) in this batch only'),
+})
 
 // Accept both camelCase and kebab-case for the reindex flag.
 // Normalization to camelCase is done in the route handler to avoid schema transforms
 // that can accidentally mark fields as required in JSON schema.
+const wikidataIdSchema = z
+  .string()
+  .regex(/^Q\d+$/, 'Expected Wikidata Q-id (e.g. Q380)')
+
+export const pipelineCompanyContextSchema = z.object({
+  companyId: z
+    .string()
+    .uuid()
+    .optional()
+    .describe('Garbo Company.id when already known'),
+  companyName: z
+    .string()
+    .optional()
+    .describe('Trusted company name; skips LLM name extraction when set'),
+  wikidataId: wikidataIdSchema
+    .optional()
+    .describe('Wikidata Q-id when already known'),
+})
+
+export const addQueueJobUrlContextSchema = pipelineCompanyContextSchema.extend({
+  url: z.string().url(),
+})
+
 export const addQueueJobBodySchema = z.object({
-    autoApprove: z.boolean().optional().default(false),
-    urls: z.array(string().url()),
-    forceReindex: z.boolean().optional().describe('Re-index markdown even if already indexed'),
-    replaceAllEmissions: z.boolean().optional().default(false).describe('Replace all scope 1,2,3 emissions and totals (delete old ones from all periods) before adding new ones'),
-    runOnly: z.array(z.string()).optional().describe('Array of worker/queue names to run (limits pipeline execution to specified steps)'),
-    batchId: z.string().optional().describe('Optional batch ID to group related reports for filtering'),
-    tags: z.array(z.string()).optional().describe('Optional tags to set on the job/report at creation (e.g. for filtering); passed through to Garbo API. Worker may set or extend tags later'),
-    cachePdf: z.boolean().optional().default(false).describe('When true (parsePdf only), fetch each URL and cache the PDF to S3 before enqueueing, so pipeline reads from storage instead of the source URL'),
-    callbackUrl: z.string().url().optional().describe('URL to POST {url} to after indexMarkdown completes. Skips emissions extraction when set.'),
-});
+  autoApprove: z.boolean().optional().default(false),
+  urls: z.array(string().url()),
+  /** Optional company identity applied to every URL in this request. */
+  pipelineCompany: pipelineCompanyContextSchema.optional(),
+  /** Per-URL company identity; overrides pipelineCompany for matching urls. */
+  urlContexts: z.array(addQueueJobUrlContextSchema).optional(),
+  forceReindex: z
+    .boolean()
+    .optional()
+    .describe('Re-index markdown even if already indexed'),
+  replaceAllEmissions: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      'Replace all scope 1,2,3 emissions and totals (delete old ones from all periods) before adding new ones'
+    ),
+  runOnly: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Array of worker/queue names to run (limits pipeline execution to specified steps)'
+    ),
+  batchId: z
+    .string()
+    .optional()
+    .describe('Optional batch ID to group related reports for filtering'),
+  tags: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Optional tags to set on the job/report at creation (e.g. for filtering); passed through to Garbo API. Worker may set or extend tags later'
+    ),
+  cachePdf: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      'When true (parsePdf only), fetch each URL and cache the PDF to S3 before enqueueing, so pipeline reads from storage instead of the source URL'
+    ),
+  callbackUrl: z
+    .string()
+    .url()
+    .optional()
+    .describe(
+      'URL to POST {url} to after indexMarkdown completes. Skips emissions extraction when set.'
+    ),
+})
 
 export const rerunQueueJobBodySchema = z.object({
-    data: z.record(z.any()).optional().describe('Optional job data overrides. Will merge with existing job data before re-running'),
-}); 
+  data: z
+    .record(z.any())
+    .optional()
+    .describe(
+      'Optional job data overrides. Will merge with existing job data before re-running'
+    ),
+})
 
 export const rerunJobsByWorkerBodySchema = z.object({
-    workerName: z.string().describe('Name of the worker / pipeline step to re-run (e.g. "scope1+2")'),
-    statuses: z.array(jobStatusSchema).optional().describe('Optional list of job statuses to consider (defaults to completed and failed jobs)'),
-    queues: z.array(z.string()).optional().describe('Optional list of queue names to restrict the rerun to (defaults to all known queues)'),
-    limit: z.union([z.number(), z.literal('all')]).optional().default(5).describe('Maximum number of companies to rerun (defaults to 5). Use "all" to rerun all companies.'),
-});
+  workerName: z
+    .string()
+    .describe('Name of the worker / pipeline step to re-run (e.g. "scope1+2")'),
+  statuses: z
+    .array(jobStatusSchema)
+    .optional()
+    .describe(
+      'Optional list of job statuses to consider (defaults to completed and failed jobs)'
+    ),
+  queues: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Optional list of queue names to restrict the rerun to (defaults to all known queues)'
+    ),
+  limit: z
+    .union([z.number(), z.literal('all')])
+    .optional()
+    .default(5)
+    .describe(
+      'Maximum number of companies to rerun (defaults to 5). Use "all" to rerun all companies.'
+    ),
+})
 
 export const rerunAndSaveQueueJobBodySchema = z.object({
-    scopes: z.array(z.string())
-        .min(1)
-        .describe('Scopes to rerun, e.g. [\"scope1\"], [\"scope2\"], [\"scope1+2\"], [\"scope3\"], or [\"scope1\", \"scope2\", \"scope3\"]'),
-});
+  scopes: z
+    .array(z.string())
+    .min(1)
+    .describe(
+      'Scopes to rerun, e.g. [\"scope1\"], [\"scope2\"], [\"scope1+2\"], [\"scope3\"], or [\"scope1\", \"scope2\", \"scope3\"]'
+    ),
+})
