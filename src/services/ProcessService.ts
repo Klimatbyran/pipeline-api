@@ -80,9 +80,10 @@ export class ProcessService {
 
     for (const processJobs of Object.values(processJobsByKey)) {
       const process = this.createProcess(processJobs);
-      const key = process.companyId
-        ? `id:${process.companyId}`
-        : `name:${process.company ?? "unknown"}`;
+      const groupCompanyId = this.pickCompanyId(processJobs);
+      const key = groupCompanyId
+        ? `id:${groupCompanyId}`
+        : `name:${this.pickRawCompanyName(processJobs) ?? "unknown"}`;
 
       if (!companyProcesses[key]) {
         companyProcesses[key] = {
@@ -111,24 +112,43 @@ export class ProcessService {
     }
 
     const grouped = Object.entries(companyProcesses).map(([key, entry]) => {
-      const canonicalName = this.pickCanonicalCompanyName(
-        companyJobs[key] ?? [],
-      );
+      const jobsForGroup = companyJobs[key] ?? [];
+      const canonicalName = this.pickCanonicalCompanyName(jobsForGroup);
       if (canonicalName) {
         entry.company = canonicalName;
       }
-      const companyId = this.pickCompanyId(companyJobs[key] ?? []);
+      const companyId = this.pickCompanyId(jobsForGroup);
       if (companyId) {
         entry.companyId = companyId;
       }
       return entry;
     });
 
+    const mergedByCompanyId = new Map<string, CompanyProcess>();
+    const unmerged: CompanyProcess[] = [];
+    for (const entry of grouped) {
+      if (entry.companyId) {
+        const existing = mergedByCompanyId.get(entry.companyId);
+        if (existing) {
+          existing.processes.push(...entry.processes);
+          if (!existing.wikidataId && entry.wikidataId) {
+            existing.wikidataId = entry.wikidataId;
+          }
+        } else {
+          mergedByCompanyId.set(entry.companyId, entry);
+        }
+      } else {
+        unmerged.push(entry);
+      }
+    }
+
+    const result = [...mergedByCompanyId.values(), ...unmerged];
+
     console.info(
       "[ProcessService] getProcessesGroupedByCompany: companies grouped",
-      { count: grouped.length },
+      { count: result.length },
     );
-    return grouped;
+    return result;
   }
 
   public async getPagedCompanyProcesses(
@@ -174,6 +194,15 @@ export class ProcessService {
     for (const job of jobs) {
       const id = job.data?.companyId;
       if (typeof id === "string" && id.trim()) return id.trim();
+    }
+    return undefined;
+  }
+
+  private pickRawCompanyName(jobs: DataJob[]): string | undefined {
+    const sorted = [...jobs].sort((a, b) => b.timestamp - a.timestamp);
+    for (const job of sorted) {
+      const name = job.data?.companyName;
+      if (typeof name === "string" && name.trim()) return name.trim();
     }
     return undefined;
   }
@@ -229,11 +258,12 @@ export class ProcessService {
     companyId = this.pickCompanyId(jobs) ?? companyId;
 
     const startedAt = Math.min(...jobs.map((job) => job.timestamp));
-    const finishedOnValues = jobs
-      .map((job) => job.finishedOn)
-      .filter((value): value is number => value !== undefined);
-    const finishedAt =
-      finishedOnValues.length > 0 ? Math.max(...finishedOnValues) : undefined;
+    const finishedAt = jobs.reduce<number | undefined>((completionTime, job) => {
+      if (job.finishedOn === undefined || completionTime === undefined) {
+        return undefined;
+      }
+      return Math.max(completionTime, job.finishedOn);
+    }, 0);
 
     const baseJobs: BaseJob[] = jobs.map((job) => {
       const { data, returnvalue, ...rest } = job;
