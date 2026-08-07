@@ -1,4 +1,4 @@
-import { QUEUE_NAMES } from "../lib/bullmq";
+import { NON_BLOCKING_FAILURE_QUEUES, QUEUE_NAMES } from "../lib/bullmq";
 import {
   BaseJob,
   CompanyProcess,
@@ -293,7 +293,13 @@ export class ProcessService {
   }
 
   private getProcessStatus(jobs: DataJob[]): ProcessStatus {
-    if (jobs.find((job) => job.status === "failed")) {
+    const hasBlockingFailure = jobs.some(
+      (job) =>
+        job.status === "failed" &&
+        job.queue &&
+        !NON_BLOCKING_FAILURE_QUEUES.has(job.queue),
+    );
+    if (hasBlockingFailure) {
       return "failed";
     }
     if (
