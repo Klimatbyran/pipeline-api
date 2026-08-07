@@ -62,6 +62,11 @@ export const QUEUE_NAMES = {
   WIKIPEDIA_UPLOAD: "wikipediaUpload",
 };
 
+/** Failed jobs on these queues must not mark the overall run as failed. */
+export const NON_BLOCKING_FAILURE_QUEUES = new Set<string>([
+  QUEUE_NAMES.EXTRACT_LEI,
+]);
+
 export const DEFAULT_PIPELINE_JOB_OPTIONS = {
   // Eviction is run-level (RunRetentionService / prune-runs), not per-queue.
   removeOnComplete: false,
