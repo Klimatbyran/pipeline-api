@@ -9,4 +9,4 @@ patches:
   - path: cronjob-patch.yaml
 images:
   - name: ghcr.io/klimatbyran/pipeline-api
-    newTag: "0.5.0" # {"$imagepolicy": "flux-system:pipeline-api:tag"}
+    newTag: "0.6.0" # {"$imagepolicy": "flux-system:pipeline-api:tag"}
