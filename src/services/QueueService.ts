@@ -135,6 +135,13 @@ export class QueueService {
           if (page.length === 0) break;
 
           const filtered = page.filter((job) => {
+            // Jobs with a callbackUrl hand off to a different pipeline
+            // entirely (e.g. climate-plans-pipeline) and never go through
+            // precheck/company resolution, so they don't belong in any
+            // company/process view — they'd otherwise show up as an
+            // "unknown" company. Still visible via the raw per-queue job
+            // list (getJobs), just not here.
+            if ((job.data as any)?.callbackUrl) return false
             if (processId && job.data?.threadId !== processId) return false;
             if (batchId != null && (job.data as any)?.batchId !== batchId)
               return false;
