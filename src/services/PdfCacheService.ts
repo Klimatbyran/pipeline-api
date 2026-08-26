@@ -101,28 +101,19 @@ function buildUrlMapKey(env: string, sourceUrl: string): string {
   return `pdf:urlmap:${env}:${sha1Hex(sourceUrl)}`;
 }
 
-export async function cachePdfFromUrl(
-  sourceUrl: string,
-  options?: { forceRefetch?: boolean }
-): Promise<PdfCacheEntry> {
+export async function cachePdfFromUrl(sourceUrl: string): Promise<PdfCacheEntry> {
   const env = getUploadEnv();
   const redis = getRedisClient();
   const urlKey = buildUrlMapKey(env, sourceUrl);
   const TTL_SECONDS = 14 * 24 * 60 * 60; // 14 days
 
-  // forceRefetch bypasses this URL->entry cache so a caller can get a
-  // guaranteed-fresh fetch (e.g. the source PDF was updated at the same
-  // URL) — S3 storage itself is separately content-addressed by sha256,
-  // so byte-identical content still resolves to the same object either way.
-  if (!options?.forceRefetch) {
-    const cachedJson = await redis.get(urlKey);
-    if (cachedJson) {
-      try {
-        const parsed = JSON.parse(cachedJson) as PdfCacheEntry;
-        if (parsed?.publicUrl && parsed?.key && parsed?.sha256) return parsed;
-      } catch {
-        /* ignore and recompute */
-      }
+  const cachedJson = await redis.get(urlKey);
+  if (cachedJson) {
+    try {
+      const parsed = JSON.parse(cachedJson) as PdfCacheEntry;
+      if (parsed?.publicUrl && parsed?.key && parsed?.sha256) return parsed;
+    } catch {
+      /* ignore and recompute */
     }
   }
 
