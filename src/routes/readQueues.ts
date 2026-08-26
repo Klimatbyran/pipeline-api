@@ -468,7 +468,9 @@ export async function readQueuesRoute(app: FastifyInstance) {
             })
           }
           try {
-            const entry = await cachePdfFromUrl(url)
+            const entry = await cachePdfFromUrl(url, {
+              forceRefetch: forceReindex,
+            })
             const perUrlThreadId = randomUUID()
             const addedJob = await queueService.addJob(
               resolvedName,
