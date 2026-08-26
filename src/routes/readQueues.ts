@@ -73,6 +73,7 @@ async function uploadAndEnqueueParsePdfJobs(params: {
     runOnly?: string[]
     tags?: string[]
     callbackUrl?: string
+    reportTypeSlug?: string
   }
   request: FastifyRequest
   fileTooLargeMessage: string
@@ -127,6 +128,7 @@ async function uploadAndEnqueueParsePdfJobs(params: {
         batchId: options.batchId,
         tags: options.tags,
         callbackUrl: options.callbackUrl,
+        reportTypeSlug: options.reportTypeSlug,
         data: withUrlReportYearForDisplay(
           {
             sourceUrl: `uploaded:${filename}`,
@@ -162,6 +164,7 @@ async function parseParsePdfUpload(request: FastifyRequest): Promise<{
     runOnly?: string[]
     tags?: string[]
     callbackUrl?: string
+    reportTypeSlug?: string
   }
   files: { buffer: Buffer; filename: string }[]
 }> {
@@ -173,6 +176,7 @@ async function parseParsePdfUpload(request: FastifyRequest): Promise<{
     runOnly?: string[]
     tags?: string[]
     callbackUrl?: string
+    reportTypeSlug?: string
   } = {}
 
   const files: { buffer: Buffer; filename: string }[] = []
@@ -219,6 +223,9 @@ async function parseParsePdfUpload(request: FastifyRequest): Promise<{
           break
         case 'callbackUrl':
           options.callbackUrl = value || undefined
+          break
+        case 'reportTypeSlug':
+          options.reportTypeSlug = value || undefined
           break
       }
     } else if (part.type === 'file') {
@@ -427,6 +434,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
         tags,
         cachePdf,
         callbackUrl,
+        reportTypeSlug,
         pipelineCompany,
         urlContexts,
       } = request.body
@@ -473,6 +481,8 @@ export async function readQueuesRoute(app: FastifyInstance) {
                 runOnly,
                 batchId,
                 tags,
+                callbackUrl,
+                reportTypeSlug,
                 data: withUrlReportYearForDisplay(
                   mergeJobDataWithCompanyContext(
                     {
@@ -514,6 +524,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
           batchId,
           tags,
           callbackUrl,
+          reportTypeSlug,
           ...(resolvedName === QUEUE_NAMES.PARSE_PDF
             ? {
                 data: withUrlReportYearForDisplay(

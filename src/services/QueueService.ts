@@ -179,6 +179,7 @@ export class QueueService {
       batchId?: string;
       tags?: string[];
       callbackUrl?: string;
+      reportTypeSlug?: string;
       /** Extra job data to merge in (e.g. sourceUrl, cache metadata). */
       data?: Record<string, any>;
     },
@@ -198,6 +199,9 @@ export class QueueService {
       ...(options?.batchId ? { batchId: options.batchId } : {}),
       ...(options?.tags?.length ? { tags: options.tags } : {}),
       ...(options?.callbackUrl ? { callbackUrl: options.callbackUrl } : {}),
+      ...(options?.reportTypeSlug
+        ? { reportTypeSlug: options.reportTypeSlug }
+        : {}),
       autoApprove,
       id,
       url: url.trim(),
