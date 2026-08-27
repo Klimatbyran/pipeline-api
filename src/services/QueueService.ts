@@ -107,6 +107,7 @@ export class QueueService {
     status?: string,
     processId?: string,
     batchId?: string,
+    includeCallbackJobs = false,
   ): Promise<DataJob[]> {
     if (!queueNames || queueNames.length === 0) {
       queueNames = Object.values(QUEUE_NAMES);
@@ -140,8 +141,11 @@ export class QueueService {
             // precheck/company resolution, so they don't belong in any
             // company/process view — they'd otherwise show up as an
             // "unknown" company. Still visible via the raw per-queue job
-            // list (getJobs), just not here.
-            if ((job.data as any)?.callbackUrl) return false
+            // list (getJobs), just not here. includeCallbackJobs opts back
+            // in for callers that specifically want those jobs (e.g. a
+            // threadId lookup for a callbackUrl-handed-off document).
+            if (!includeCallbackJobs && (job.data as any)?.callbackUrl)
+              return false
             if (processId && job.data?.threadId !== processId) return false;
             if (batchId != null && (job.data as any)?.batchId !== batchId)
               return false;
