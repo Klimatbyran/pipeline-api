@@ -112,6 +112,12 @@ export const addQueueJobBodySchema = z.object({
     .describe(
       'URL to POST {url} to after indexMarkdown completes. Skips emissions extraction when set.'
     ),
+  reportTypeSlug: z
+    .string()
+    .optional()
+    .describe(
+      'Explicit ReportType.slug to tag persisted markdown with (e.g. "municipal-climate-plan"). Not inferred from callbackUrl, since callbackUrl is a generic hand-off any future consumer could use.'
+    ),
 })
 
 export const rerunQueueJobBodySchema = z.object({

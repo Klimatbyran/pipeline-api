@@ -72,6 +72,8 @@ async function uploadAndEnqueueParsePdfJobs(params: {
     replaceAllEmissions?: boolean
     runOnly?: string[]
     tags?: string[]
+    callbackUrl?: string
+    reportTypeSlug?: string
   }
   request: FastifyRequest
   fileTooLargeMessage: string
@@ -125,6 +127,8 @@ async function uploadAndEnqueueParsePdfJobs(params: {
         runOnly: options.runOnly,
         batchId: options.batchId,
         tags: options.tags,
+        callbackUrl: options.callbackUrl,
+        reportTypeSlug: options.reportTypeSlug,
         data: withUrlReportYearForDisplay(
           {
             sourceUrl: `uploaded:${filename}`,
@@ -159,6 +163,8 @@ async function parseParsePdfUpload(request: FastifyRequest): Promise<{
     replaceAllEmissions?: boolean
     runOnly?: string[]
     tags?: string[]
+    callbackUrl?: string
+    reportTypeSlug?: string
   }
   files: { buffer: Buffer; filename: string }[]
 }> {
@@ -169,6 +175,8 @@ async function parseParsePdfUpload(request: FastifyRequest): Promise<{
     replaceAllEmissions?: boolean
     runOnly?: string[]
     tags?: string[]
+    callbackUrl?: string
+    reportTypeSlug?: string
   } = {}
 
   const files: { buffer: Buffer; filename: string }[] = []
@@ -212,6 +220,12 @@ async function parseParsePdfUpload(request: FastifyRequest): Promise<{
           } catch {
             /* ignore invalid JSON */
           }
+          break
+        case 'callbackUrl':
+          options.callbackUrl = value || undefined
+          break
+        case 'reportTypeSlug':
+          options.reportTypeSlug = value || undefined
           break
       }
     } else if (part.type === 'file') {
@@ -289,7 +303,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
       schema: {
         summary: 'Upload PDFs and add parsePdf jobs',
         description:
-          'Accept multipart/form-data with PDF files and optional options (autoApprove, batchId, forceReindex, replaceAllEmissions, runOnly, tags). Same job shape as URL-based POST /queues/parsePdf. Requires S3_BUCKET to be set.',
+          'Accept multipart/form-data with PDF files and optional options (autoApprove, batchId, forceReindex, replaceAllEmissions, runOnly, tags, callbackUrl). Same job shape as URL-based POST /queues/parsePdf. Requires S3_BUCKET to be set.',
         tags: ['Queues'],
         consumes: ['multipart/form-data'],
         response: {
@@ -420,6 +434,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
         tags,
         cachePdf,
         callbackUrl,
+        reportTypeSlug,
         pipelineCompany,
         urlContexts,
       } = request.body
@@ -466,6 +481,8 @@ export async function readQueuesRoute(app: FastifyInstance) {
                 runOnly,
                 batchId,
                 tags,
+                callbackUrl,
+                reportTypeSlug,
                 data: withUrlReportYearForDisplay(
                   mergeJobDataWithCompanyContext(
                     {
@@ -507,6 +524,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
           batchId,
           tags,
           callbackUrl,
+          reportTypeSlug,
           ...(resolvedName === QUEUE_NAMES.PARSE_PDF
             ? {
                 data: withUrlReportYearForDisplay(
