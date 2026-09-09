@@ -184,6 +184,8 @@ export class QueueService {
       tags?: string[];
       callbackUrl?: string;
       reportTypeSlug?: string;
+      readImages?: boolean;
+      languages?: string[];
       /** Extra job data to merge in (e.g. sourceUrl, cache metadata). */
       data?: Record<string, any>;
     },
@@ -206,6 +208,10 @@ export class QueueService {
       ...(options?.reportTypeSlug
         ? { reportTypeSlug: options.reportTypeSlug }
         : {}),
+      ...(options?.readImages !== undefined
+        ? { readImages: options.readImages }
+        : {}),
+      ...(options?.languages?.length ? { languages: options.languages } : {}),
       autoApprove,
       id,
       url: url.trim(),
