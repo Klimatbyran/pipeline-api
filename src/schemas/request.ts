@@ -118,6 +118,18 @@ export const addQueueJobBodySchema = z.object({
     .describe(
       'Explicit ReportType.slug to tag persisted markdown with (e.g. "municipal-climate-plan"). Not inferred from callbackUrl, since callbackUrl is a generic hand-off any future consumer could use.'
     ),
+  readImages: z
+    .boolean()
+    .optional()
+    .describe(
+      'When true (parsePdf/doclingParsePDF only), OCR pictures Docling would otherwise leave as bare placeholders and describe genuine diagrams with a vision model, inserting recovered content in place. Costs extra time/money per picture — voluntary, defaults to false (no image processing) when omitted.'
+    ),
+  languages: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'OCR language codes (e.g. ["sv", "en"]) for readImages. Only used when readImages is true; defaults to Swedish + English on the Docling side if omitted.'
+    ),
 })
 
 export const rerunQueueJobBodySchema = z.object({

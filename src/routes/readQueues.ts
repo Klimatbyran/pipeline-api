@@ -435,6 +435,8 @@ export async function readQueuesRoute(app: FastifyInstance) {
         cachePdf,
         callbackUrl,
         reportTypeSlug,
+        readImages,
+        languages,
         pipelineCompany,
         urlContexts,
       } = request.body
@@ -483,6 +485,8 @@ export async function readQueuesRoute(app: FastifyInstance) {
                 tags,
                 callbackUrl,
                 reportTypeSlug,
+                readImages,
+                languages,
                 data: withUrlReportYearForDisplay(
                   mergeJobDataWithCompanyContext(
                     {
@@ -525,6 +529,8 @@ export async function readQueuesRoute(app: FastifyInstance) {
           tags,
           callbackUrl,
           reportTypeSlug,
+          readImages,
+          languages,
           ...(resolvedName === QUEUE_NAMES.PARSE_PDF
             ? {
                 data: withUrlReportYearForDisplay(
