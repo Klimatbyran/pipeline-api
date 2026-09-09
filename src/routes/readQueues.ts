@@ -74,6 +74,8 @@ async function uploadAndEnqueueParsePdfJobs(params: {
     tags?: string[]
     callbackUrl?: string
     reportTypeSlug?: string
+    readImages?: boolean
+    languages?: string[]
   }
   request: FastifyRequest
   fileTooLargeMessage: string
@@ -129,6 +131,8 @@ async function uploadAndEnqueueParsePdfJobs(params: {
         tags: options.tags,
         callbackUrl: options.callbackUrl,
         reportTypeSlug: options.reportTypeSlug,
+        readImages: options.readImages,
+        languages: options.languages,
         data: withUrlReportYearForDisplay(
           {
             sourceUrl: `uploaded:${filename}`,
@@ -165,6 +169,8 @@ async function parseParsePdfUpload(request: FastifyRequest): Promise<{
     tags?: string[]
     callbackUrl?: string
     reportTypeSlug?: string
+    readImages?: boolean
+    languages?: string[]
   }
   files: { buffer: Buffer; filename: string }[]
 }> {
@@ -177,6 +183,8 @@ async function parseParsePdfUpload(request: FastifyRequest): Promise<{
     tags?: string[]
     callbackUrl?: string
     reportTypeSlug?: string
+    readImages?: boolean
+    languages?: string[]
   } = {}
 
   const files: { buffer: Buffer; filename: string }[] = []
@@ -226,6 +234,16 @@ async function parseParsePdfUpload(request: FastifyRequest): Promise<{
           break
         case 'reportTypeSlug':
           options.reportTypeSlug = value || undefined
+          break
+        case 'readImages':
+          options.readImages = value === 'true' || value === '1'
+          break
+        case 'languages':
+          try {
+            options.languages = value ? JSON.parse(value) : undefined
+          } catch {
+            /* ignore invalid JSON */
+          }
           break
       }
     } else if (part.type === 'file') {
