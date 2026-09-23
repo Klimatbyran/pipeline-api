@@ -27,6 +27,7 @@ export const QUEUE_NAMES = {
   PARSE_PDF: "parsePdf",
   NLM_EXTRACT_TABLES: "nlmExtractTables",
   INDEX_MARKDOWN: "indexMarkdown",
+  CHECK_EMISSIONS_PRESENCE: "checkEmissionsPresence",
   PRECHECK: "precheck",
   GUESS_WIKIDATA: "guessWikidata",
   // Legacy combined scope queue (kept for backwards compatibility)

@@ -177,6 +177,7 @@ export class QueueService {
     autoApprove: boolean = false,
     options?: {
       forceReindex?: boolean;
+      requireEmissionsPresence?: boolean;
       threadId?: string;
       replaceAllEmissions?: boolean;
       runOnly?: string[];
@@ -197,6 +198,9 @@ export class QueueService {
       ...(options?.threadId ? { threadId: options.threadId } : {}),
       ...(options?.forceReindex !== undefined
         ? { forceReindex: options.forceReindex }
+        : {}),
+      ...(options?.requireEmissionsPresence !== undefined
+        ? { requireEmissionsPresence: options.requireEmissionsPresence }
         : {}),
       ...(options?.replaceAllEmissions !== undefined
         ? { replaceAllEmissions: options.replaceAllEmissions }

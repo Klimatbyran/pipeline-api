@@ -318,6 +318,16 @@ export class ProcessService {
     ) {
       return "completed";
     }
+    if (
+      jobs.find(
+        (job) =>
+          job.queue === QUEUE_NAMES.CHECK_EMISSIONS_PRESENCE &&
+          job.status === "completed" &&
+          (job.returnvalue as { gated?: boolean } | undefined)?.gated === true,
+      )
+    ) {
+      return "skipped_no_emissions";
+    }
     return "active";
   }
 
