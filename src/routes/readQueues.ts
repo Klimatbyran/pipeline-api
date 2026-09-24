@@ -69,6 +69,7 @@ async function uploadAndEnqueueParsePdfJobs(params: {
     autoApprove?: boolean
     batchId?: string
     forceReindex?: boolean
+    requireEmissionsPresence?: boolean
     replaceAllEmissions?: boolean
     runOnly?: string[]
     tags?: string[]
@@ -124,6 +125,7 @@ async function uploadAndEnqueueParsePdfJobs(params: {
       options.autoApprove ?? false,
       {
         forceReindex: options.forceReindex,
+        requireEmissionsPresence: options.requireEmissionsPresence,
         threadId: perUrlThreadId,
         replaceAllEmissions: options.replaceAllEmissions,
         runOnly: options.runOnly,
@@ -164,6 +166,7 @@ async function parseParsePdfUpload(request: FastifyRequest): Promise<{
     autoApprove?: boolean
     batchId?: string
     forceReindex?: boolean
+    requireEmissionsPresence?: boolean
     replaceAllEmissions?: boolean
     runOnly?: string[]
     tags?: string[]
@@ -178,6 +181,7 @@ async function parseParsePdfUpload(request: FastifyRequest): Promise<{
     autoApprove?: boolean
     batchId?: string
     forceReindex?: boolean
+    requireEmissionsPresence?: boolean
     replaceAllEmissions?: boolean
     runOnly?: string[]
     tags?: string[]
@@ -211,6 +215,9 @@ async function parseParsePdfUpload(request: FastifyRequest): Promise<{
         }
         case 'forceReindex':
           options.forceReindex = value === 'true' || value === '1'
+          break
+        case 'requireEmissionsPresence':
+          options.requireEmissionsPresence = value === 'true' || value === '1'
           break
         case 'replaceAllEmissions':
           options.replaceAllEmissions = value === 'true' || value === '1'
@@ -350,6 +357,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
         autoApprove?: boolean
         batchId?: string
         forceReindex?: boolean
+        requireEmissionsPresence?: boolean
         replaceAllEmissions?: boolean
         runOnly?: string[]
         tags?: string[]
@@ -446,6 +454,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
         urls,
         autoApprove,
         forceReindex,
+        requireEmissionsPresence,
         replaceAllEmissions,
         runOnly,
         batchId,
@@ -466,6 +475,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
           urlsCount: Array.isArray(urls) ? urls.length : 0,
           autoApprove: !!autoApprove,
           forceReindex: !!forceReindex,
+          requireEmissionsPresence: !!requireEmissionsPresence,
           replaceAllEmissions: !!replaceAllEmissions,
           runOnly: runOnly,
           batchId: batchId ?? undefined,
@@ -496,6 +506,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
               autoApprove,
               {
                 forceReindex,
+                requireEmissionsPresence,
                 threadId: perUrlThreadId,
                 replaceAllEmissions,
                 runOnly,
@@ -540,6 +551,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
         const perUrlThreadId = randomUUID()
         const jobOptions = {
           forceReindex,
+          requireEmissionsPresence,
           threadId: perUrlThreadId,
           replaceAllEmissions,
           runOnly,

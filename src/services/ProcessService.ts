@@ -269,6 +269,8 @@ export class ProcessService {
       const { data, returnvalue, ...rest } = job;
       return {
         ...rest,
+        // Keep returnvalue so Validate can show emissions-gate skips (gated:true).
+        returnvalue,
         companyId:
           typeof data?.companyId === "string" ? data.companyId : undefined,
         companyName:
@@ -317,6 +319,16 @@ export class ProcessService {
       )
     ) {
       return "completed";
+    }
+    if (
+      jobs.find(
+        (job) =>
+          job.queue === QUEUE_NAMES.CHECK_EMISSIONS_PRESENCE &&
+          job.status === "completed" &&
+          (job.returnvalue as { gated?: boolean } | undefined)?.gated === true,
+      )
+    ) {
+      return "skipped_no_emissions";
     }
     return "active";
   }

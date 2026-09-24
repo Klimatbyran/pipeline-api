@@ -27,6 +27,13 @@ export const pipeline: Pipeline = [
         id: "indexMarkdown",
         name: "Markdown",
         next: {
+            target: ["checkEmissionsPresence", "precheck"]
+        }
+    },
+    {
+        id: "checkEmissionsPresence",
+        name: "Emissions presence",
+        next: {
             target: ["precheck"]
         }
     },

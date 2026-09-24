@@ -75,6 +75,13 @@ export const addQueueJobBodySchema = z.object({
     .boolean()
     .optional()
     .describe('Re-index markdown even if already indexed'),
+  requireEmissionsPresence: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      'When true, after markdown is ready run a cheap Scope 1/2/3 mention check; if none found, skip precheck and all LLM workers.'
+    ),
   replaceAllEmissions: z
     .boolean()
     .optional()

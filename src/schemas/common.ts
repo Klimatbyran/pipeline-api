@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const jobStatusSchema = z.enum(['active', 'waiting', 'waiting-children', 'prioritized', 'completed', 'failed', 'delayed', 'paused', 'repeat', 'wait']);
 
-export const processStatusSchema = z.enum(['active', 'completed', 'failed', 'waiting']);
+export const processStatusSchema = z.enum(['active', 'completed', 'failed', 'waiting', 'skipped_no_emissions']);
 
 const pipelineQueueSchema = z.object({
     id: z.string(),
