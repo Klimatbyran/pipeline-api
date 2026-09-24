@@ -21,6 +21,8 @@ After running the API, the API definition can be found at [http://localhost:3001
 
 ![Deployment Diagram](./docs/deployment.png)
 
+Stage follows the latest `*-rc.*` image tag via Flux ImagePolicy (semver). Each successful main CI run must publish a **new** tag for stage to roll; reusing an already-deployed tag does not redeploy.
+
 ### Prerequisites
 
 - Node.js (23+)
