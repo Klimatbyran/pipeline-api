@@ -7,6 +7,8 @@ export const LIVE_JOB_STATUSES = new Set([
   "waiting-children",
 ]);
 
+/** Job-level terminals. Emissions-gate skips complete as `completed` (with
+ * gated:true returnvalue) — they are pruned like any other finished run. */
 export const TERMINAL_JOB_STATUSES = new Set(["completed", "failed"]);
 
 export const DEFAULT_KEEP_RUN_COUNT = 15;

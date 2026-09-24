@@ -15,9 +15,22 @@ function getProcessStatus(
 ): string {
   const hasBlockingFailure = jobs.some((job) => job.status === "failed");
   if (hasBlockingFailure) return "failed";
+  // Prefer emissions-gate terminal over leftover waiting jobs.
+  if (
+    jobs.find(
+      (job) =>
+        job.queue === QUEUE_NAMES.CHECK_EMISSIONS_PRESENCE &&
+        job.status === "completed" &&
+        job.returnvalue?.gated === true,
+    )
+  ) {
+    return "skipped_no_emissions";
+  }
   if (
     jobs.find((job) =>
-      ["waiting", "delayed", "paused"].includes(job.status ?? ""),
+      ["waiting", "delayed", "paused", "waiting-children"].includes(
+        job.status ?? "",
+      ),
     )
   ) {
     return "waiting";
@@ -31,16 +44,6 @@ function getProcessStatus(
   ) {
     return "completed";
   }
-  if (
-    jobs.find(
-      (job) =>
-        job.queue === QUEUE_NAMES.CHECK_EMISSIONS_PRESENCE &&
-        job.status === "completed" &&
-        job.returnvalue?.gated === true,
-    )
-  ) {
-    return "skipped_no_emissions";
-  }
   return "active";
 }
 
@@ -53,6 +56,20 @@ describe("process status emissions gate", () => {
           status: "completed",
           returnvalue: { gated: true },
         },
+      ]),
+      "skipped_no_emissions",
+    );
+  });
+
+  it("prefers skipped_no_emissions over leftover waiting jobs", () => {
+    assert.equal(
+      getProcessStatus([
+        {
+          queue: QUEUE_NAMES.CHECK_EMISSIONS_PRESENCE,
+          status: "completed",
+          returnvalue: { gated: true },
+        },
+        { queue: QUEUE_NAMES.PRECHECK, status: "waiting" },
       ]),
       "skipped_no_emissions",
     );
