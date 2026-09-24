@@ -304,9 +304,23 @@ export class ProcessService {
     if (hasBlockingFailure) {
       return "failed";
     }
+    // Prefer emissions-gate terminal over any leftover waiting jobs so live
+    // Jobbstatus does not stay on "waiting" after a gated skip.
+    if (
+      jobs.find(
+        (job) =>
+          job.queue === QUEUE_NAMES.CHECK_EMISSIONS_PRESENCE &&
+          job.status === "completed" &&
+          (job.returnvalue as { gated?: boolean } | undefined)?.gated === true,
+      )
+    ) {
+      return "skipped_no_emissions";
+    }
     if (
       jobs.find((job) =>
-        ["waiting", "delayed", "paused"].includes(job.status ?? ""),
+        ["waiting", "delayed", "paused", "waiting-children"].includes(
+          job.status ?? "",
+        ),
       )
     ) {
       return "waiting";
@@ -319,16 +333,6 @@ export class ProcessService {
       )
     ) {
       return "completed";
-    }
-    if (
-      jobs.find(
-        (job) =>
-          job.queue === QUEUE_NAMES.CHECK_EMISSIONS_PRESENCE &&
-          job.status === "completed" &&
-          (job.returnvalue as { gated?: boolean } | undefined)?.gated === true,
-      )
-    ) {
-      return "skipped_no_emissions";
     }
     return "active";
   }
