@@ -269,6 +269,8 @@ export class ProcessService {
       const { data, returnvalue, ...rest } = job;
       return {
         ...rest,
+        // Keep returnvalue so Validate can show emissions-gate skips (gated:true).
+        returnvalue,
         companyId:
           typeof data?.companyId === "string" ? data.companyId : undefined,
         companyName:

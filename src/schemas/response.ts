@@ -39,6 +39,8 @@ export const baseJobSchema = z.object({
   status: jobStatusSchema.optional(),
   companyId: z.string().optional(),
   companyName: z.string().optional(),
+  /** Present when useful for UI (e.g. checkEmissionsPresence gated outcome). */
+  returnvalue: z.any().optional(),
 });
 
 export const dataJobSchema = baseJobSchema.extend({
