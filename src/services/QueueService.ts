@@ -108,6 +108,12 @@ export class QueueService {
     processId?: string,
     batchId?: string,
     includeCallbackJobs = false,
+    /**
+     * `processList` drops markdown-sized returnvalues and keeps only the
+     * job.data fields process/company views need. Full payloads stay on
+     * getJobData / queue detail and callers that parse fiscalYear etc.
+     */
+    payload: "full" | "processList" = "full",
   ): Promise<DataJob[]> {
     if (!queueNames || queueNames.length === 0) {
       queueNames = Object.values(QUEUE_NAMES);
@@ -160,8 +166,16 @@ export class QueueService {
         return Promise.all(
           rawJobs.map(async (job) => {
             const dataJob: DataJob = await transformJobtoBaseJob(job);
-            dataJob.data = job.data;
-            dataJob.returnvalue = job.returnvalue;
+            if (payload === "processList") {
+              dataJob.data = slimProcessListJobData(job.data);
+              dataJob.returnvalue = slimProcessListReturnValue(
+                queueName,
+                job.returnvalue,
+              );
+            } else {
+              dataJob.data = job.data;
+              dataJob.returnvalue = job.returnvalue;
+            }
             return dataJob;
           }),
         );
@@ -1052,6 +1066,43 @@ export class QueueService {
       }
     }
   }
+}
+
+/** Fields ProcessService / retention need for grouping — not full job.data. */
+const PROCESS_LIST_DATA_KEYS = [
+  "threadId",
+  "companyId",
+  "companyName",
+  "reportYear",
+  "documentReportYear",
+  "wikidata",
+  "batchId",
+  "waitingForCompanyName",
+] as const;
+
+export function slimProcessListJobData(
+  data: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const out: Record<string, unknown> = {};
+  for (const key of PROCESS_LIST_DATA_KEYS) {
+    if (data[key] !== undefined) out[key] = data[key];
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Process list only needs checkEmissionsPresence `{ gated }` for status.
+ * Drop markdown / emissions-sized returnvalues from every other queue.
+ */
+export function slimProcessListReturnValue(
+  queueName: string,
+  returnvalue: unknown,
+): { gated: boolean } | undefined {
+  if (queueName !== QUEUE_NAMES.CHECK_EMISSIONS_PRESENCE) return undefined;
+  if (!returnvalue || typeof returnvalue !== "object") return undefined;
+  const gated = (returnvalue as { gated?: unknown }).gated;
+  return typeof gated === "boolean" ? { gated } : undefined;
 }
 
 export async function transformJobtoBaseJob(job: Job): Promise<BaseJob> {
