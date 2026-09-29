@@ -24,7 +24,14 @@ export class ProcessService {
   }
 
   public async getProcess(id: string): Promise<Process> {
-    const jobs = await this.queueService.getDataJobs(undefined, undefined, id);
+    const jobs = await this.queueService.getDataJobs(
+      undefined,
+      undefined,
+      id,
+      undefined,
+      false,
+      "processList",
+    );
     return this.createProcess(jobs);
   }
 
@@ -34,6 +41,8 @@ export class ProcessService {
       undefined,
       undefined,
       batchId,
+      false,
+      "processList",
     );
     console.info("[ProcessService] getProcesses: jobs fetched", {
       count: jobs.length,
@@ -64,6 +73,8 @@ export class ProcessService {
       undefined,
       undefined,
       batchId,
+      false,
+      "processList",
     );
 
     const processJobsByKey: Record<string, DataJob[]> = {};
@@ -168,7 +179,14 @@ export class ProcessService {
    * may be slow with very large job counts.
    */
   public async getAvailableBatches(): Promise<string[]> {
-    const jobs = await this.queueService.getDataJobs(undefined, undefined);
+    const jobs = await this.queueService.getDataJobs(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      "processList",
+    );
     const batchIds = new Set<string>();
     for (const job of jobs) {
       const bid = (job.data as { batchId?: string })?.batchId;

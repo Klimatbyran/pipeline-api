@@ -89,7 +89,14 @@ export class RunRetentionService {
     const keepCount = options.keepCount ?? DEFAULT_KEEP_RUN_COUNT;
     const dryRun = options.dryRun ?? false;
 
-    const allJobs = await this.queueService.getDataJobs();
+    const allJobs = await this.queueService.getDataJobs(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      "processList",
+    );
     const retentionJobs = allJobs
       .map(toRetentionJobRef)
       .filter((job): job is RetentionJobRef => job != null);
