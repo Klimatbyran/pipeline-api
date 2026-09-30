@@ -200,6 +200,7 @@ export class QueueService {
       callbackUrl?: string;
       reportTypeSlug?: string;
       readImages?: boolean;
+      forceRedescribeImages?: boolean;
       languages?: string[];
       /** Extra job data to merge in (e.g. sourceUrl, cache metadata). */
       data?: Record<string, any>;
@@ -228,6 +229,9 @@ export class QueueService {
         : {}),
       ...(options?.readImages !== undefined
         ? { readImages: options.readImages }
+        : {}),
+      ...(options?.forceRedescribeImages !== undefined
+        ? { forceRedescribeImages: options.forceRedescribeImages }
         : {}),
       ...(options?.languages?.length ? { languages: options.languages } : {}),
       autoApprove,

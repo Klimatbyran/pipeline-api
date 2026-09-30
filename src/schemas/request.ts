@@ -131,6 +131,12 @@ export const addQueueJobBodySchema = z.object({
     .describe(
       'When true (parsePdf/doclingParsePDF only), OCR pictures Docling would otherwise leave as bare placeholders and describe genuine diagrams with a vision model, inserting recovered content in place. Costs extra time/money per picture — voluntary, defaults to false (no image processing) when omitted.'
     ),
+  forceRedescribeImages: z
+    .boolean()
+    .optional()
+    .describe(
+      'Only meaningful alongside readImages. Skips the description cache (keyed by image hash) and re-runs the vision model on every picture, instead of reusing an existing description for that exact image. Defaults to false (reuse cached descriptions) when omitted.'
+    ),
   languages: z
     .array(z.string())
     .optional()

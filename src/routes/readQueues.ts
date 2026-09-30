@@ -76,6 +76,7 @@ async function uploadAndEnqueueParsePdfJobs(params: {
     callbackUrl?: string
     reportTypeSlug?: string
     readImages?: boolean
+    forceRedescribeImages?: boolean
     languages?: string[]
   }
   request: FastifyRequest
@@ -134,6 +135,7 @@ async function uploadAndEnqueueParsePdfJobs(params: {
         callbackUrl: options.callbackUrl,
         reportTypeSlug: options.reportTypeSlug,
         readImages: options.readImages,
+        forceRedescribeImages: options.forceRedescribeImages,
         languages: options.languages,
         data: withUrlReportYearForDisplay(
           {
@@ -173,6 +175,7 @@ async function parseParsePdfUpload(request: FastifyRequest): Promise<{
     callbackUrl?: string
     reportTypeSlug?: string
     readImages?: boolean
+    forceRedescribeImages?: boolean
     languages?: string[]
   }
   files: { buffer: Buffer; filename: string }[]
@@ -188,6 +191,7 @@ async function parseParsePdfUpload(request: FastifyRequest): Promise<{
     callbackUrl?: string
     reportTypeSlug?: string
     readImages?: boolean
+    forceRedescribeImages?: boolean
     languages?: string[]
   } = {}
 
@@ -244,6 +248,9 @@ async function parseParsePdfUpload(request: FastifyRequest): Promise<{
           break
         case 'readImages':
           options.readImages = value === 'true' || value === '1'
+          break
+        case 'forceRedescribeImages':
+          options.forceRedescribeImages = value === 'true' || value === '1'
           break
         case 'languages':
           try {
@@ -463,6 +470,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
         callbackUrl,
         reportTypeSlug,
         readImages,
+        forceRedescribeImages,
         languages,
         pipelineCompany,
         urlContexts,
@@ -515,6 +523,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
                 callbackUrl,
                 reportTypeSlug,
                 readImages,
+                forceRedescribeImages,
                 languages,
                 data: withUrlReportYearForDisplay(
                   mergeJobDataWithCompanyContext(
@@ -560,6 +569,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
           callbackUrl,
           reportTypeSlug,
           readImages,
+          forceRedescribeImages,
           languages,
           ...(resolvedName === QUEUE_NAMES.PARSE_PDF
             ? {
