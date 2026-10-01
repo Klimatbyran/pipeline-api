@@ -9,6 +9,13 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      # Backstop for concurrencyPolicy: Forbid — without this, a Job that
+      # never exits (e.g. Redis unreachable, see the script's own
+      # MAX_RUNTIME_MS comment) blocks every future scheduled run forever,
+      # since Forbid treats it as still "active". This bounds the Job's
+      # total wall-clock time across all OnFailure restarts, guaranteeing
+      # it eventually frees the concurrency lock no matter what's wrong.
+      activeDeadlineSeconds: 600
       template:
         spec:
           restartPolicy: OnFailure
