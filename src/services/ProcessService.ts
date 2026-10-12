@@ -15,6 +15,24 @@ export class ProcessService {
     this.queueService = queueService;
   }
 
+  // getProcessesGroupedByCompany does an unfiltered fetch across every
+  // queue (getDataJobs(undefined, ...) defaults to all ~25 queues) and
+  // regroups every job into companies, from scratch, on every call.
+  // getPagedCompanyProcesses calls it fresh per page with no sharing
+  // between calls -- so paging through "all companies" multiplies an
+  // already-expensive full-queue scan by however many pages get
+  // requested. As total job volume grows over time, each of those scans
+  // gets more expensive too, which is why this got worse over time
+  // rather than staying at a fixed cost. Caching the grouped result for
+  // a short window means a full page-through only pays for the scan
+  // once, not once per page -- cheap, safe staleness for a status view
+  // (nothing here needs to be real-time to the second).
+  private groupedByCompanyCache = new Map<
+    string,
+    { expiresAt: number; data: Promise<CompanyProcess[]> }
+  >();
+  private static readonly GROUPED_BY_COMPANY_CACHE_TTL_MS = 30_000;
+
   public static async getProcessService(): Promise<ProcessService> {
     if (!ProcessService.processService) {
       const queueService = await QueueService.getQueueService();
@@ -66,6 +84,27 @@ export class ProcessService {
   }
 
   public async getProcessesGroupedByCompany(
+    batchId?: string,
+  ): Promise<CompanyProcess[]> {
+    const cacheKey = batchId ?? "";
+    const cached = this.groupedByCompanyCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.data;
+    }
+
+    const promise = this.computeProcessesGroupedByCompany(batchId);
+    this.groupedByCompanyCache.set(cacheKey, {
+      expiresAt: Date.now() + ProcessService.GROUPED_BY_COMPANY_CACHE_TTL_MS,
+      data: promise,
+    });
+    // A rejected fetch must not poison the cache for the next 30s --- drop
+    // it immediately so the next call retries instead of repeating the
+    // same failure silently for the rest of the TTL window.
+    promise.catch(() => this.groupedByCompanyCache.delete(cacheKey));
+    return promise;
+  }
+
+  private async computeProcessesGroupedByCompany(
     batchId?: string,
   ): Promise<CompanyProcess[]> {
     const jobs = await this.queueService.getDataJobs(
