@@ -15,6 +15,40 @@ export class ProcessService {
     this.queueService = queueService;
   }
 
+  // getProcessesGroupedByCompany does an unfiltered fetch across every
+  // queue (getDataJobs(undefined, ...) defaults to all ~25 queues) and
+  // regroups every job into companies, from scratch, on every call.
+  // getPagedCompanyProcesses calls it fresh per page with no sharing
+  // between calls -- so paging through "all companies" multiplies an
+  // already-expensive full-queue scan by however many pages get
+  // requested. As total job volume grows over time, each of those scans
+  // gets more expensive too, which is why this got worse over time
+  // rather than staying at a fixed cost. Caching the grouped result for
+  // a short window means a full page-through only pays for the scan
+  // once, not once per page -- cheap, safe staleness for a status view
+  // (nothing here needs to be real-time to the second).
+  private groupedByCompanyCache = new Map<
+    string,
+    { expiresAt: number; data: Promise<CompanyProcess[]> }
+  >();
+  // Short TTL while anything in the result could still change -- covers
+  // both the in-flight fetch itself (stampede protection: concurrent
+  // callers share this promise instead of each starting their own) and
+  // any result where at least one process is still active/waiting.
+  private static readonly ACTIVE_CACHE_TTL_MS = 30_000;
+  // A batchId whose every process has already reached a terminal state
+  // won't change again on its own -- only a retrigger (new jobs added to
+  // that batchId) would move it, and that's rare enough that a much
+  // longer TTL is safe. Long enough to meaningfully cut repeat-browsing
+  // cost on historical/completed batches, short enough that a retrigger
+  // doesn't stay invisible for too long.
+  private static readonly DONE_CACHE_TTL_MS = 10 * 60_000;
+  private static readonly TERMINAL_PROCESS_STATUSES = new Set([
+    "completed",
+    "failed",
+    "skipped_no_emissions",
+  ]);
+
   public static async getProcessService(): Promise<ProcessService> {
     if (!ProcessService.processService) {
       const queueService = await QueueService.getQueueService();
@@ -66,6 +100,59 @@ export class ProcessService {
   }
 
   public async getProcessesGroupedByCompany(
+    batchId?: string,
+  ): Promise<CompanyProcess[]> {
+    const cacheKey = batchId ?? "";
+    const cached = this.groupedByCompanyCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.data;
+    }
+
+    const promise = this.computeProcessesGroupedByCompany(batchId);
+    // Store the in-flight promise immediately, short TTL, so concurrent
+    // callers arriving before this resolves share this one fetch instead
+    // of each starting their own -- this is what actually stops a burst
+    // of near-simultaneous page requests from each triggering a full scan.
+    this.groupedByCompanyCache.set(cacheKey, {
+      expiresAt: Date.now() + ProcessService.ACTIVE_CACHE_TTL_MS,
+      data: promise,
+    });
+    promise
+      .then((result) => {
+        // Once resolved, extend the TTL if everything in it has already
+        // reached a terminal state -- only re-set if this is still the
+        // cache entry for this key (a newer call may have replaced it).
+        if (this.groupedByCompanyCache.get(cacheKey)?.data !== promise) return;
+        const ttl = this.allProcessesTerminal(result)
+          ? ProcessService.DONE_CACHE_TTL_MS
+          : ProcessService.ACTIVE_CACHE_TTL_MS;
+        this.groupedByCompanyCache.set(cacheKey, {
+          expiresAt: Date.now() + ttl,
+          data: promise,
+        });
+      })
+      // A rejected fetch must not poison the cache for the rest of the TTL
+      // window -- drop it immediately so the next call retries instead of
+      // silently repeating the same failure.
+      .catch(() => {
+        if (this.groupedByCompanyCache.get(cacheKey)?.data === promise) {
+          this.groupedByCompanyCache.delete(cacheKey);
+        }
+      });
+    return promise;
+  }
+
+  private allProcessesTerminal(companies: CompanyProcess[]): boolean {
+    return companies.every((company) =>
+      company.processes.every(
+        (process) =>
+          process.status != null &&
+          ProcessService.TERMINAL_PROCESS_STATUSES.has(process.status),
+      ),
+    );
+  }
+
+  private async computeProcessesGroupedByCompany(
     batchId?: string,
   ): Promise<CompanyProcess[]> {
     const jobs = await this.queueService.getDataJobs(
