@@ -106,6 +106,18 @@ yarn dev
 
 4. Open your browser and navigate to `http://localhost:3001/api`
 
+## Redis run retention
+
+BullMQ jobs live in the shared Garbo Redis (`maxmemory` + `noeviction` in prod). Retention is run-level (whole `threadId`), not per-queue:
+
+| Mechanism | When | What it keeps / removes |
+| --- | --- | --- |
+| Garbo prune hook | After a run **succeeds** or is **skipped (no emissions)** | Calls `POST /api/internal/prune-runs` with default keep count (15 newest terminal runs globally). **Does not fire on failed runs.** |
+| Nightly cron `pipeline-api-prune-runs` | `0 3 * * *` | Same keep-15 prune for all terminal runs (completed **and** failed). |
+| Memory guard cron `pipeline-api-redis-memory-guard` | Every 5 minutes | Reads Redis `INFO memory`. **≥70%**: alert log (+ optional `REDIS_MEMORY_ALERT_WEBHOOK_URL`). **≥80%**: prune with `keepCount=0` — remove **every non-live** run (success, fail, skipped). Active/waiting jobs are never removed. |
+
+Local: `npm run redis-memory-guard` (add `--dry-run` to only report). Manual: `npm run prune-runs-by-company -- --keep=0`.
+
 ## Development
 
 ### Project Structure

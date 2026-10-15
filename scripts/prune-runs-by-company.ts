@@ -39,8 +39,11 @@ async function main() {
   const keepCountRaw = readArg("keep");
   const keepCount = keepCountRaw ? Number(keepCountRaw) : undefined;
 
-  if (keepCountRaw != null && (!Number.isInteger(keepCount) || keepCount! <= 0)) {
-    throw new Error("--keep must be a positive integer");
+  if (
+    keepCountRaw != null &&
+    (!Number.isInteger(keepCount) || keepCount! < 0)
+  ) {
+    throw new Error("--keep must be an integer >= 0 (0 = prune all terminal runs)");
   }
 
   console.log(
