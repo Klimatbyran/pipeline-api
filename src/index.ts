@@ -1,6 +1,6 @@
 import startApp from "./app"
 import apiConfig from "./config/api"
-import startQueues from "./lib/bullmq";
+import { QueueService } from "./services/QueueService";
 
 const port = apiConfig.port;
 
@@ -8,7 +8,8 @@ const port = apiConfig.port;
 
 async function main() {
     const app = await startApp();
-    await startQueues();
+    const queueService = await QueueService.getQueueService();
+    await queueService.getQueues();
     try {
         await app.listen(
           {

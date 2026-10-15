@@ -36,24 +36,25 @@ function deepMerge(
   return output;
 }
 
+async function startQueuesByName(): Promise<Record<string, Queue>> {
+  const queues = await startQueues();
+  return Object.fromEntries(queues.map((queue) => [queue.name, queue]));
+}
+
 export class QueueService {
   private static queueService: QueueService | undefined;
-  private queues: Record<string, Queue> | undefined;
+  private queuesByNamePromise: Promise<Record<string, Queue>> | undefined;
 
   private constructor() {}
 
   public async getQueues() {
-    if (!this.queues) {
-      const queues = await startQueues();
-      this.queues = queues.reduce(
-        (acc, queue) => {
-          acc[queue.name] = queue;
-          return acc;
-        },
-        {} as Record<string, Queue>,
-      );
+    if (!this.queuesByNamePromise) {
+      this.queuesByNamePromise = startQueuesByName().catch((error) => {
+        this.queuesByNamePromise = undefined;
+        throw error;
+      });
     }
-    return this.queues;
+    return this.queuesByNamePromise;
   }
 
   public static async getQueueService() {
@@ -64,11 +65,11 @@ export class QueueService {
   }
 
   public async getQueue(name: string) {
-    if (this.queues === undefined) this.queues = await this.getQueues();
+    const queuesByName = await this.getQueues();
 
-    const queue = this.queues[name];
+    const queue = queuesByName[name];
     if (!queue) {
-      const available = Object.keys(this.queues).join(", ");
+      const available = Object.keys(queuesByName).join(", ");
       throw new Error(`Unknown queue: ${name}. Available: ${available}`);
     }
     return queue;
