@@ -114,7 +114,7 @@ BullMQ jobs live in the shared Garbo Redis (`maxmemory` + `noeviction` in prod).
 | --- | --- | --- |
 | Garbo prune hook | After a run **succeeds** or is **skipped (no emissions)** | Calls `POST /api/internal/prune-runs` with default keep count (15 newest terminal runs globally). **Does not fire on failed runs.** |
 | Nightly cron `pipeline-api-prune-runs` | `0 3 * * *` | Same keep-15 prune for all terminal runs (completed **and** failed). |
-| Memory guard cron `pipeline-api-redis-memory-guard` | Every 5 minutes | Reads Redis `INFO memory`. **≥70%**: alert log (+ optional `REDIS_MEMORY_ALERT_WEBHOOK_URL`). **≥80%**: prune with `keepCount=0` — remove **every non-live** run (success, fail, skipped). Active/waiting jobs are never removed. |
+| Memory guard cron `pipeline-api-redis-memory-guard` | Every 5 minutes | Reads Redis `INFO memory`. **≥70%**: alert log + optional Discord webhook (`REDIS_MEMORY_ALERT_WEBHOOK_URL`, throttled by `REDIS_MEMORY_ALERT_COOLDOWN_SECONDS`, default 1h). **≥80%**: prune with `keepCount=0` — remove **every non-live** run (success, fail, skipped); Discord webhook always fires on prune. Active/waiting jobs are never removed. |
 
 Local: `npm run redis-memory-guard` (add `--dry-run` to only report). Manual: `npm run prune-runs-by-company -- --keep=0`.
 
