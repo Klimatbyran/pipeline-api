@@ -233,7 +233,7 @@ export class RunRetentionService {
     const threadIds = options.threadIds ?? [];
 
     if (!clearAllTerminal && threadIds.length === 0) {
-      throw new Error("Provide threadIds and/or clearAllTerminal: true");
+      throw new Error("Provide threadIds (non-empty) or clearAllTerminal: true");
     }
 
     const runs = await this.loadRunSummaries();
@@ -241,32 +241,36 @@ export class RunRetentionService {
     if (clearAllTerminal) {
       const selection = selectRunsToPrune(runs, { keepCount: 0 });
       const applied = await this.applySelection(selection, dryRun);
+      const skippedLiveThreadIds = runs
+        .filter((run) => run.hasLiveJob)
+        .map((run) => run.threadId);
       console.info("[RunRetentionService] clearRuns(allTerminal)", {
         dryRun,
         runsPruned: applied.prunedThreadIds.length,
-        jobsRemoved: dryRun ? 0 : applied.jobsRemoved,
+        jobsRemoved: applied.jobsRemoved,
         skippedLiveRuns: selection.skippedLiveRuns,
       });
       return {
         companiesProcessed: new Set(runs.map((run) => run.companyKey)).size,
         runsPruned: applied.prunedThreadIds.length,
-        jobsRemoved: dryRun ? 0 : applied.jobsRemoved,
+        jobsRemoved: applied.jobsRemoved,
         skippedLiveRuns: selection.skippedLiveRuns,
         protectedThreadIds: selection.protectedThreadIds,
         prunedThreadIds: applied.prunedThreadIds,
         dryRun,
         notFoundThreadIds: [],
-        skippedLiveThreadIds: [],
+        skippedLiveThreadIds,
       };
     }
 
     const selection = selectThreadIdsToClear(runs, threadIds);
     const applied = await this.applySelection(selection, dryRun);
+    const prunedIdSet = new Set(selection.threadIdsToPrune);
     console.info("[RunRetentionService] clearRuns(threadIds)", {
       dryRun,
       requested: threadIds.length,
       runsPruned: applied.prunedThreadIds.length,
-      jobsRemoved: dryRun ? 0 : applied.jobsRemoved,
+      jobsRemoved: applied.jobsRemoved,
       skippedLiveThreadIds: selection.skippedLiveThreadIds,
       notFoundThreadIds: selection.notFoundThreadIds,
     });
@@ -274,11 +278,11 @@ export class RunRetentionService {
     return {
       companiesProcessed: new Set(
         runs
-          .filter((run) => threadIds.includes(run.threadId))
+          .filter((run) => prunedIdSet.has(run.threadId))
           .map((run) => run.companyKey),
       ).size,
       runsPruned: applied.prunedThreadIds.length,
-      jobsRemoved: dryRun ? 0 : applied.jobsRemoved,
+      jobsRemoved: applied.jobsRemoved,
       skippedLiveRuns: selection.skippedLiveRuns,
       protectedThreadIds: selection.protectedThreadIds,
       prunedThreadIds: applied.prunedThreadIds,

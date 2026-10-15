@@ -13,7 +13,7 @@ const clearRunsBodySchema = z
       body.clearAllTerminal === true ||
       (Array.isArray(body.threadIds) && body.threadIds.length > 0),
     {
-      message: "Provide threadIds (non-empty) and/or clearAllTerminal: true",
+      message: "Provide threadIds (non-empty) or clearAllTerminal: true",
     },
   );
 

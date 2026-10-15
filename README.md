@@ -158,7 +158,8 @@ The API uses JWT (JSON Web Token) authentication to protect **write operations o
 - `POST /api/queues/:name/:id/rerun` - Re-run jobs
 - `POST /api/queues/:name/:id/rerun-and-save` - Re-run and save emissions
 - `POST /api/queues/rerun-by-worker` - Bulk re-run operations
-- Any other write operations on `/api/queues/*`, `/api/processes/*`, or `/api/pipeline/*`
+- `POST /api/runs/clear` - Clear finished BullMQ runs from Redis (staff / Goffer)
+- Any other write operations on `/api/queues/*`, `/api/processes/*`, `/api/pipeline/*`, or `/api/runs/*`
 
 ### Unprotected Operations
 
