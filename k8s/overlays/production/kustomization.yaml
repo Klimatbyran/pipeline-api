@@ -7,6 +7,7 @@ patches:
   - path: ingress-patch.yaml
   - path: deployment-patch.yaml
   - path: cronjob-patch.yaml
+  - path: cronjob-redis-memory-guard-patch.yaml
 images:
   - name: ghcr.io/klimatbyran/pipeline-api
     newTag: "0.8.1" # {"$imagepolicy": "flux-system:pipeline-api:tag"}

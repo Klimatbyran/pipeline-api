@@ -88,6 +88,35 @@ describe("runRetention", () => {
     assert.deepEqual(selection.threadIdsToPrune, ["run-1"]);
   });
 
+  it("keepCount 0 prunes completed and failed terminal runs", () => {
+    const summaries = buildRunSummaries([
+      job({
+        id: "ok",
+        threadId: "success-run",
+        companyName: "Acme AB",
+        status: "completed",
+        finishedOn: 100,
+        timestamp: 100,
+      }),
+      job({
+        id: "bad",
+        threadId: "failed-run",
+        companyName: "Beta AB",
+        status: "failed",
+        finishedOn: 200,
+        timestamp: 200,
+      }),
+    ]);
+
+    const selection = selectRunsToPrune(summaries, { keepCount: 0 });
+
+    assert.deepEqual(
+      [...selection.threadIdsToPrune].sort(),
+      ["failed-run", "success-run"],
+    );
+    assert.equal(selection.protectedThreadIds.length, 0);
+  });
+
   it("never prunes runs with any live job", () => {
     const summaries = buildRunSummaries([
       job({

@@ -6,7 +6,8 @@ import { RunRetentionService } from "../services/RunRetentionService";
 const pruneRunsBodySchema = z.object({
   companyName: z.string().min(1).optional(),
   threadId: z.string().min(1).optional(),
-  keepCount: z.number().int().positive().max(100).optional(),
+  // 0 = prune every non-live terminal run (emergency / memory-pressure path).
+  keepCount: z.number().int().min(0).max(100).optional(),
   dryRun: z.boolean().optional(),
 });
 
@@ -31,7 +32,7 @@ export async function internalPruneRunsRoute(app: FastifyInstance) {
         200: pruneRunsResponseSchema,
       },
       description:
-        "Prune terminal pipeline runs beyond the per-company Redis retention cap",
+        "Prune terminal pipeline runs beyond the Redis retention cap. keepCount 0 removes every non-live (completed/failed) run.",
       tags: ["Internal"],
     },
     handler: async (request) => {

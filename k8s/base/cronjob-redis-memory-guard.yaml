@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: pipeline-api-redis-memory-guard
+spec:
+  # Frequent enough to catch Redis filling before maxmemory / noeviction fails writes.
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # Same Forbid deadlock risk as prune-runs: a hung Job blocks every
+      # future schedule. Bound wall-clock time across OnFailure restarts.
+      activeDeadlineSeconds: 600
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: redis-memory-guard
+              image: ghcr.io/klimatbyran/pipeline-api
+              command: ["npm", "run", "redis-memory-guard"]
+              env:
+                - name: REDIS_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: redis
+                      key: redis-password
+                - name: REDIS_HOST
+                  value: redis-master.garbo-stage.svc.cluster.local
+                - name: REDIS_MEMORY_ALERT_RATIO
+                  value: "0.7"
+                - name: REDIS_MEMORY_PRUNE_RATIO
+                  value: "0.8"
+                # Optional Discord incoming webhook for >=70% alerts (throttled).
+                - name: REDIS_MEMORY_ALERT_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: env
+                      key: REDIS_MEMORY_ALERT_WEBHOOK_URL
+                      optional: true
+                - name: REDIS_MEMORY_ALERT_COOLDOWN_SECONDS
+                  value: "3600"
+                - name: NODE_ENV
+                  valueFrom:
+                    secretKeyRef:
+                      name: env
+                      key: NODE_ENV

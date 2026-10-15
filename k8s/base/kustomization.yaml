@@ -6,3 +6,4 @@ resources:
   - ingress.yaml
   - service.yaml
   - cronjob-prune-runs.yaml
+  - cronjob-redis-memory-guard.yaml
