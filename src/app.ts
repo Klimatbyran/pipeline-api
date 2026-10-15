@@ -14,6 +14,7 @@ import { z } from 'zod'
 import { readProcessRoute } from './routes/readProcess'
 import { readPipelineRoute } from './routes/readPipeline'
 import { internalPruneRunsRoute } from './routes/internalPruneRuns'
+import { clearRunsRoute } from './routes/clearRuns'
 import { validateJWT } from './middleware/auth'
 
 async function startApp() {
@@ -76,6 +77,7 @@ async function startApp() {
       '/api/queues',
       '/api/processes',
       '/api/pipeline',
+      '/api/runs',
       '/api/cache-pdf',
       '/api/internal',
     ];
@@ -153,6 +155,10 @@ async function startApp() {
 
   app.register(internalPruneRunsRoute, {
     prefix: '/api/internal',
+  })
+
+  app.register(clearRunsRoute, {
+    prefix: '/api/runs',
   })
 
   await app.register(scalarPlugin, {

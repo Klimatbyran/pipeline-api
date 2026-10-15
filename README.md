@@ -115,8 +115,23 @@ BullMQ jobs live in the shared Garbo Redis (`maxmemory` + `noeviction` in prod).
 | Garbo prune hook | After a run **succeeds** or is **skipped (no emissions)** | Calls `POST /api/internal/prune-runs` with default keep count (15 newest terminal runs globally). **Does not fire on failed runs.** |
 | Nightly cron `pipeline-api-prune-runs` | `0 3 * * *` | Same keep-15 prune for all terminal runs (completed **and** failed). |
 | Memory guard cron `pipeline-api-redis-memory-guard` | Every 5 minutes | Reads Redis `INFO memory`. **≥70%**: alert log + optional Discord webhook (`REDIS_MEMORY_ALERT_WEBHOOK_URL`, throttled by `REDIS_MEMORY_ALERT_COOLDOWN_SECONDS`, default 1h). **≥80%**: prune with `keepCount=0` — remove **every non-live** run (success, fail, skipped); Discord webhook always fires on prune. Active/waiting jobs are never removed. |
+| Staff clear `POST /api/runs/clear` (JWT) | Goffer Jobbstatus / manual | Clear selected `threadIds` or `{ "clearAllTerminal": true }` (same as keepCount 0). Active/waiting runs are never removed. |
 
 Local: `npm run redis-memory-guard` (add `--dry-run` to only report). Manual: `npm run prune-runs-by-company -- --keep=0`.
+
+### Clearing finished runs (staff / Goffer)
+
+`POST /api/runs/clear` (JWT) removes finished BullMQ runs from Redis. Provide **either** selected thread ids **or** clear-all (not both; if both are sent, `clearAllTerminal` wins):
+
+```json
+{ "threadIds": ["abc", "def"] }
+```
+
+```json
+{ "clearAllTerminal": true }
+```
+
+Active/waiting jobs are never removed. Use Goffer Jobbstatus for the UI, or call the endpoint directly.
 
 ## Development
 
@@ -143,7 +158,8 @@ The API uses JWT (JSON Web Token) authentication to protect **write operations o
 - `POST /api/queues/:name/:id/rerun` - Re-run jobs
 - `POST /api/queues/:name/:id/rerun-and-save` - Re-run and save emissions
 - `POST /api/queues/rerun-by-worker` - Bulk re-run operations
-- Any other write operations on `/api/queues/*`, `/api/processes/*`, or `/api/pipeline/*`
+- `POST /api/runs/clear` - Clear finished BullMQ runs from Redis (staff / Goffer)
+- Any other write operations on `/api/queues/*`, `/api/processes/*`, `/api/pipeline/*`, or `/api/runs/*`
 
 ### Unprotected Operations
 

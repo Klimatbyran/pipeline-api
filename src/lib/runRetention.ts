@@ -129,6 +129,55 @@ export type SelectRunsToPruneOptions = {
   excludeThreadId?: string;
 };
 
+export type SelectThreadIdsToClearResult = PruneSelectionResult & {
+  /** Requested ids with no matching Redis run. */
+  notFoundThreadIds: string[];
+  /** Requested ids still containing a live/active job (not cleared). */
+  skippedLiveThreadIds: string[];
+};
+
+/**
+ * Staff/manual clear: remove only the listed terminal runs.
+ * Live runs in the request are skipped; unknown ids are reported as not found.
+ */
+export function selectThreadIdsToClear(
+  runs: RunSummary[],
+  threadIds: string[],
+): SelectThreadIdsToClearResult {
+  const wanted = new Set(
+    threadIds.map((id) => id.trim()).filter((id) => id.length > 0),
+  );
+  const byThreadId = new Map(runs.map((run) => [run.threadId, run]));
+
+  const threadIdsToPrune: string[] = [];
+  const skippedLiveThreadIds: string[] = [];
+  const notFoundThreadIds: string[] = [];
+  const jobRefsToRemove: RetentionJobRef[] = [];
+
+  for (const threadId of wanted) {
+    const run = byThreadId.get(threadId);
+    if (!run) {
+      notFoundThreadIds.push(threadId);
+      continue;
+    }
+    if (run.hasLiveJob) {
+      skippedLiveThreadIds.push(threadId);
+      continue;
+    }
+    threadIdsToPrune.push(threadId);
+    jobRefsToRemove.push(...run.jobRefs);
+  }
+
+  return {
+    threadIdsToPrune,
+    protectedThreadIds: [],
+    skippedLiveRuns: skippedLiveThreadIds.length,
+    jobRefsToRemove,
+    notFoundThreadIds,
+    skippedLiveThreadIds,
+  };
+}
+
 export function selectRunsToPrune(
   runs: RunSummary[],
   options: SelectRunsToPruneOptions = {},

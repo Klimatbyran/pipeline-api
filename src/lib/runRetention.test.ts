@@ -5,6 +5,7 @@ import {
   buildRunSummaries,
   deriveCompanyKey,
   selectRunsToPrune,
+  selectThreadIdsToClear,
 } from "./runRetention.js";
 
 function job(
@@ -178,5 +179,41 @@ describe("runRetention", () => {
 
     assert.ok(!selection.threadIdsToPrune.includes("new-run"));
     assert.ok(!selection.threadIdsToPrune.includes("old-run"));
+  });
+
+  it("selectThreadIdsToClear removes only requested terminal runs", () => {
+    const summaries = buildRunSummaries([
+      job({
+        id: "1",
+        threadId: "keep-me",
+        status: "completed",
+        finishedOn: 100,
+        timestamp: 100,
+      }),
+      job({
+        id: "2",
+        threadId: "clear-me",
+        status: "failed",
+        finishedOn: 200,
+        timestamp: 200,
+      }),
+      job({
+        id: "3",
+        threadId: "live-me",
+        status: "active",
+        timestamp: 300,
+      }),
+    ]);
+
+    const selection = selectThreadIdsToClear(summaries, [
+      "clear-me",
+      "live-me",
+      "missing",
+    ]);
+
+    assert.deepEqual(selection.threadIdsToPrune, ["clear-me"]);
+    assert.deepEqual(selection.skippedLiveThreadIds, ["live-me"]);
+    assert.deepEqual(selection.notFoundThreadIds, ["missing"]);
+    assert.ok(!selection.threadIdsToPrune.includes("keep-me"));
   });
 });

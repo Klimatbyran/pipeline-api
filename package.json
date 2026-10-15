@@ -8,7 +8,7 @@
     "clean-old-bullmq": "node --max-old-space-size=512 --import tsx scripts/clean-old-bullmq.ts",
     "prune-runs-by-company": "node --max-old-space-size=512 --import tsx scripts/prune-runs-by-company.ts",
     "redis-memory-guard": "node --max-old-space-size=512 --import tsx scripts/redis-memory-guard.ts",
-    "test": "node --import tsx --test src/lib/runRetention.test.ts src/lib/pipelineCompanyJobData.test.ts src/lib/processStatusEmissionsGate.test.ts src/lib/redisMemoryGuard.test.ts"
+    "test": "node --import tsx --test src/lib/runRetention.test.ts src/lib/pipelineCompanyJobData.test.ts src/lib/processStatusEmissionsGate.test.ts src/lib/redisMemoryGuard.test.ts src/services/RunRetentionService.test.ts"
   },
   "author": "Christian Landgren, Moritz Zingg et al.",
   "license": "ISC",
