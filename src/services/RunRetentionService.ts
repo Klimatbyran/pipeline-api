@@ -1,11 +1,13 @@
 import { DataJob } from "../schemas/types";
 import {
   DEFAULT_KEEP_RUN_COUNT,
+  PruneSelectionResult,
   RetentionJobRef,
   SelectRunsToPruneOptions,
   buildRunSummaries,
   runMatchesCompanyFilter,
   selectRunsToPrune,
+  selectThreadIdsToClear,
 } from "../lib/runRetention";
 import { QueueService } from "./QueueService";
 
@@ -22,6 +24,19 @@ export type PruneRunsResult = {
   protectedThreadIds: string[];
   prunedThreadIds: string[];
   dryRun: boolean;
+};
+
+export type ClearRunsOptions = {
+  /** Clear these thread ids (terminal only; live runs are skipped). */
+  threadIds?: string[];
+  /** Clear every non-live terminal run (same as keepCount 0). */
+  clearAllTerminal?: boolean;
+  dryRun?: boolean;
+};
+
+export type ClearRunsResult = PruneRunsResult & {
+  notFoundThreadIds: string[];
+  skippedLiveThreadIds: string[];
 };
 
 function toRetentionJobRef(job: DataJob): RetentionJobRef | null {
@@ -85,10 +100,7 @@ export class RunRetentionService {
     }
   }
 
-  public async pruneRuns(options: PruneRunsOptions = {}): Promise<PruneRunsResult> {
-    const keepCount = options.keepCount ?? DEFAULT_KEEP_RUN_COUNT;
-    const dryRun = options.dryRun ?? false;
-
+  private async loadRunSummaries() {
     const allJobs = await this.queueService.getDataJobs(
       undefined,
       undefined,
@@ -100,23 +112,17 @@ export class RunRetentionService {
     const retentionJobs = allJobs
       .map(toRetentionJobRef)
       .filter((job): job is RetentionJobRef => job != null);
+    return buildRunSummaries(retentionJobs);
+  }
 
-    const runs = buildRunSummaries(retentionJobs);
-    const selection = selectRunsToPrune(runs, {
-      keepCount,
-      companyName: options.companyName,
-      excludeThreadId: options.excludeThreadId,
-    });
-
-    const companiesProcessed = new Set(
-      (options.companyName
-        ? runs.filter((run) =>
-            runMatchesCompanyFilter(run, options.companyName!),
-          )
-        : runs
-      ).map((run) => run.companyKey),
-    ).size;
-
+  private async applySelection(
+    selection: PruneSelectionResult,
+    dryRun: boolean,
+  ): Promise<{
+    jobsRemoved: number;
+    prunedThreadIds: string[];
+    partialPruneThreadIds: string[];
+  }> {
     const refsByThreadId = new Map<string, RetentionJobRef[]>();
     for (const ref of selection.jobRefsToRemove) {
       const list = refsByThreadId.get(ref.threadId) ?? [];
@@ -163,32 +169,122 @@ export class RunRetentionService {
       }
     }
 
+    return {
+      jobsRemoved: dryRun ? selection.jobRefsToRemove.length : jobsRemoved,
+      prunedThreadIds: dryRun
+        ? selection.threadIdsToPrune
+        : prunedThreadIds,
+      partialPruneThreadIds,
+    };
+  }
+
+  public async pruneRuns(options: PruneRunsOptions = {}): Promise<PruneRunsResult> {
+    const keepCount = options.keepCount ?? DEFAULT_KEEP_RUN_COUNT;
+    const dryRun = options.dryRun ?? false;
+
+    const runs = await this.loadRunSummaries();
+    const selection = selectRunsToPrune(runs, {
+      keepCount,
+      companyName: options.companyName,
+      excludeThreadId: options.excludeThreadId,
+    });
+
+    const companiesProcessed = new Set(
+      (options.companyName
+        ? runs.filter((run) =>
+            runMatchesCompanyFilter(run, options.companyName!),
+          )
+        : runs
+      ).map((run) => run.companyKey),
+    ).size;
+
+    const applied = await this.applySelection(selection, dryRun);
+
     console.info("[RunRetentionService] pruneRuns", {
       dryRun,
       companyName: options.companyName ?? null,
       excludeThreadId: options.excludeThreadId ?? null,
       keepCount,
       companiesProcessed,
-      runsPruned: dryRun
-        ? selection.threadIdsToPrune.length
-        : prunedThreadIds.length,
-      partialPruneThreadIds,
-      jobsRemoved: dryRun ? selection.jobRefsToRemove.length : jobsRemoved,
+      runsPruned: applied.prunedThreadIds.length,
+      partialPruneThreadIds: applied.partialPruneThreadIds,
+      jobsRemoved: dryRun ? 0 : applied.jobsRemoved,
       skippedLiveRuns: selection.skippedLiveRuns,
     });
 
     return {
       companiesProcessed,
-      runsPruned: dryRun
-        ? selection.threadIdsToPrune.length
-        : prunedThreadIds.length,
-      jobsRemoved: dryRun ? 0 : jobsRemoved,
+      runsPruned: applied.prunedThreadIds.length,
+      jobsRemoved: dryRun ? 0 : applied.jobsRemoved,
       skippedLiveRuns: selection.skippedLiveRuns,
       protectedThreadIds: selection.protectedThreadIds,
-      prunedThreadIds: dryRun
-        ? selection.threadIdsToPrune
-        : prunedThreadIds,
+      prunedThreadIds: applied.prunedThreadIds,
       dryRun,
+    };
+  }
+
+  /**
+   * Staff clear from Goffer: remove selected terminal runs, or all finished runs.
+   * Never removes runs that still have a live/active job.
+   */
+  public async clearRuns(options: ClearRunsOptions): Promise<ClearRunsResult> {
+    const dryRun = options.dryRun ?? false;
+    const clearAllTerminal = options.clearAllTerminal === true;
+    const threadIds = options.threadIds ?? [];
+
+    if (!clearAllTerminal && threadIds.length === 0) {
+      throw new Error("Provide threadIds and/or clearAllTerminal: true");
+    }
+
+    const runs = await this.loadRunSummaries();
+
+    if (clearAllTerminal) {
+      const selection = selectRunsToPrune(runs, { keepCount: 0 });
+      const applied = await this.applySelection(selection, dryRun);
+      console.info("[RunRetentionService] clearRuns(allTerminal)", {
+        dryRun,
+        runsPruned: applied.prunedThreadIds.length,
+        jobsRemoved: dryRun ? 0 : applied.jobsRemoved,
+        skippedLiveRuns: selection.skippedLiveRuns,
+      });
+      return {
+        companiesProcessed: new Set(runs.map((run) => run.companyKey)).size,
+        runsPruned: applied.prunedThreadIds.length,
+        jobsRemoved: dryRun ? 0 : applied.jobsRemoved,
+        skippedLiveRuns: selection.skippedLiveRuns,
+        protectedThreadIds: selection.protectedThreadIds,
+        prunedThreadIds: applied.prunedThreadIds,
+        dryRun,
+        notFoundThreadIds: [],
+        skippedLiveThreadIds: [],
+      };
+    }
+
+    const selection = selectThreadIdsToClear(runs, threadIds);
+    const applied = await this.applySelection(selection, dryRun);
+    console.info("[RunRetentionService] clearRuns(threadIds)", {
+      dryRun,
+      requested: threadIds.length,
+      runsPruned: applied.prunedThreadIds.length,
+      jobsRemoved: dryRun ? 0 : applied.jobsRemoved,
+      skippedLiveThreadIds: selection.skippedLiveThreadIds,
+      notFoundThreadIds: selection.notFoundThreadIds,
+    });
+
+    return {
+      companiesProcessed: new Set(
+        runs
+          .filter((run) => threadIds.includes(run.threadId))
+          .map((run) => run.companyKey),
+      ).size,
+      runsPruned: applied.prunedThreadIds.length,
+      jobsRemoved: dryRun ? 0 : applied.jobsRemoved,
+      skippedLiveRuns: selection.skippedLiveRuns,
+      protectedThreadIds: selection.protectedThreadIds,
+      prunedThreadIds: applied.prunedThreadIds,
+      dryRun,
+      notFoundThreadIds: selection.notFoundThreadIds,
+      skippedLiveThreadIds: selection.skippedLiveThreadIds,
     };
   }
 }
