@@ -58,6 +58,8 @@ export const QUEUE_NAMES = {
   DIFF_DESCRIPTIONS: "diffDescriptions",
   EXTRACT_LEI: "extractLEI",
   DIFF_LEI: "diffLEI",
+  EXTRACT_ISIN: "extractISIN",
+  DIFF_ISIN: "diffISIN",
   SAVE_TO_API: "saveToAPI",
   SEND_COMPANY_LINK: "sendCompanyLink",
   WIKIPEDIA_UPLOAD: "wikipediaUpload",
@@ -66,6 +68,7 @@ export const QUEUE_NAMES = {
 /** Failed jobs on these queues must not mark the overall run as failed. */
 export const NON_BLOCKING_FAILURE_QUEUES = new Set<string>([
   QUEUE_NAMES.EXTRACT_LEI,
+  QUEUE_NAMES.EXTRACT_ISIN,
 ]);
 
 export const DEFAULT_PIPELINE_JOB_OPTIONS = {
