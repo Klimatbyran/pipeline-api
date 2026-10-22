@@ -28,12 +28,15 @@ import {
   formatRatioPercent,
 } from '../src/lib/redisMemoryGuard'
 import { RunRetentionService } from '../src/services/RunRetentionService'
+import type { PruneRunsResult } from '../src/services/RunRetentionService'
 
 const MAX_RUNTIME_MS = 2 * 60 * 1000
 const WEBHOOK_TIMEOUT_MS = 8_000
 const ALERT_COOLDOWN_KEY = 'pipeline-api:redis-memory-guard:alert'
 /** Default: at most one Discord webhook per hour while stuck in alert-only band. */
 const DEFAULT_ALERT_COOLDOWN_SECONDS = 60 * 60
+
+type WebhookPostResult = 'ok' | 'failed' | 'skipped_no_url'
 
 function readRatioEnv(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -55,9 +58,20 @@ function readPositiveIntEnv(name: string, fallback: number): number {
   return value
 }
 
-async function postAlertWebhook(message: string): Promise<void> {
+function webhookConfigured(): boolean {
+  return Boolean(process.env.REDIS_MEMORY_ALERT_WEBHOOK_URL?.trim())
+}
+
+async function postAlertWebhook(message: string): Promise<WebhookPostResult> {
   const webhookUrl = process.env.REDIS_MEMORY_ALERT_WEBHOOK_URL?.trim()
-  if (!webhookUrl) return
+  if (!webhookUrl) {
+    console.warn(
+      '[RedisMemoryGuard] Discord webhook skipped: REDIS_MEMORY_ALERT_WEBHOOK_URL is unset in this CronJob pod. ' +
+        'Expected key REDIS_MEMORY_ALERT_WEBHOOK_URL on Secret `env` in the same namespace as the CronJob ' +
+        '(garbo for prod, garbo-stage for stage).',
+    )
+    return 'skipped_no_url'
+  }
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS)
@@ -69,13 +83,17 @@ async function postAlertWebhook(message: string): Promise<void> {
       signal: controller.signal,
     })
     if (!response.ok) {
-      console.error('[RedisMemoryGuard] alert webhook failed', {
+      console.error('[RedisMemoryGuard] Discord webhook failed', {
         status: response.status,
         body: await response.text().catch(() => ''),
       })
+      return 'failed'
     }
+    console.info('[RedisMemoryGuard] Discord webhook posted OK')
+    return 'ok'
   } catch (error) {
-    console.error('[RedisMemoryGuard] alert webhook error', error)
+    console.error('[RedisMemoryGuard] Discord webhook error', error)
+    return 'failed'
   } finally {
     clearTimeout(timer)
   }
@@ -99,6 +117,14 @@ async function claimAlertWebhookSlot(
   return result === 'OK'
 }
 
+function formatPruneResultLine(result: PruneRunsResult): string {
+  return [
+    `runs cleared ${result.runsPruned}`,
+    `jobs removed ${result.jobsRemoved}`,
+    `live skipped ${result.skippedLiveRuns}`,
+  ].join(', ')
+}
+
 async function main() {
   const alertRatio = readRatioEnv(
     'REDIS_MEMORY_ALERT_RATIO',
@@ -117,6 +143,7 @@ async function main() {
     DEFAULT_ALERT_COOLDOWN_SECONDS,
   )
   const dryRun = process.argv.includes('--dry-run')
+  const discordConfigured = webhookConfigured()
 
   const redis = getRedisClient()
   const snapshot = await getRedisMemorySnapshot(redis)
@@ -137,6 +164,7 @@ async function main() {
     pruneRatio,
     forceClearRatio,
     dryRun,
+    discordWebhookConfigured: discordConfigured,
     skipReason: decision.skipReason,
   })
 
@@ -150,19 +178,16 @@ async function main() {
     process.exit(0)
   }
 
-  if (decision.shouldAlert) {
-    const actionLabel = decision.shouldForceClearAll
-      ? `≥ ${formatRatioPercent(forceClearRatio)} — FORCE-clearing ALL BullMQ runs (including live/active)`
-      : decision.shouldPruneAllTerminal
-        ? `≥ ${formatRatioPercent(pruneRatio)} — pruning all non-active BullMQ runs`
-        : `≥ ${formatRatioPercent(alertRatio)} alert threshold`
-
+  // Soft alert band (below prune): Discord at most once per cooldown.
+  if (
+    decision.shouldAlert &&
+    !decision.shouldPruneAllTerminal &&
+    !decision.shouldForceClearAll
+  ) {
     const message = [
-      decision.shouldForceClearAll
-        ? '🚨 Redis memory FAIL-SAFE'
-        : '🚨 Redis memory pressure',
+      '🚨 Redis memory pressure',
       `${ratioLabel} used (${formatMemoryMiB(decision.usedMemoryBytes)} / ${formatMemoryMiB(decision.maxMemoryBytes)})`,
-      actionLabel,
+      `≥ ${formatRatioPercent(alertRatio)} alert threshold`,
       dryRun ? '(dry-run)' : '',
     ]
       .filter(Boolean)
@@ -170,12 +195,7 @@ async function main() {
 
     console.error(`[RedisMemoryGuard] ALERT ${message}`)
 
-    // Always notify on prune / force-clear; otherwise at most once per cooldown.
-    const shouldWebhook =
-      decision.shouldForceClearAll ||
-      decision.shouldPruneAllTerminal ||
-      (await claimAlertWebhookSlot(redis, alertCooldownSeconds))
-    if (shouldWebhook) {
+    if (await claimAlertWebhookSlot(redis, alertCooldownSeconds)) {
       await postAlertWebhook(message)
     } else {
       console.info(
@@ -188,12 +208,36 @@ async function main() {
     const service = await RunRetentionService.getRunRetentionService()
     const result = await service.forceClearAllRuns({ dryRun })
     console.info('[RedisMemoryGuard] emergency force-clear result', result)
+
+    const message = [
+      '🚨 Redis memory FAIL-SAFE',
+      `${ratioLabel} used (${formatMemoryMiB(decision.usedMemoryBytes)} / ${formatMemoryMiB(decision.maxMemoryBytes)})`,
+      `≥ ${formatRatioPercent(forceClearRatio)} — FORCE-cleared ALL BullMQ runs (including live/active)`,
+      formatPruneResultLine(result),
+      dryRun ? '(dry-run)' : '',
+    ]
+      .filter(Boolean)
+      .join(' · ')
+    console.error(`[RedisMemoryGuard] ALERT ${message}`)
+    await postAlertWebhook(message)
   } else if (decision.shouldPruneAllTerminal) {
     const service = await RunRetentionService.getRunRetentionService()
     // keepCount 0 = no protected terminal runs; live runs are still skipped.
     const result = await service.pruneRuns({ keepCount: 0, dryRun })
     console.info('[RedisMemoryGuard] emergency prune result', result)
-  } else {
+
+    const message = [
+      '🚨 Redis memory prune',
+      `${ratioLabel} used (${formatMemoryMiB(decision.usedMemoryBytes)} / ${formatMemoryMiB(decision.maxMemoryBytes)})`,
+      `≥ ${formatRatioPercent(pruneRatio)} — pruned all non-active BullMQ runs`,
+      formatPruneResultLine(result),
+      dryRun ? '(dry-run)' : '',
+    ]
+      .filter(Boolean)
+      .join(' · ')
+    console.error(`[RedisMemoryGuard] ALERT ${message}`)
+    await postAlertWebhook(message)
+  } else if (!decision.shouldAlert) {
     console.info('[RedisMemoryGuard] below prune threshold; no prune')
   }
 
