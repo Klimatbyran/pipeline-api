@@ -24,6 +24,66 @@ export function getRedisClient(): Redis {
   return client;
 }
 
+/**
+ * Wait until the ioredis client is ready to accept commands.
+ *
+ * Required for one-shot CronJobs when `enableOfflineQueue` is false: the
+ * first command (e.g. `INFO memory`) can race the TCP/auth handshake and
+ * throw "Stream isn't writeable and enableOfflineQueue options is false",
+ * failing the Job in a few seconds.
+ */
+export async function waitForRedisReady(
+  redis: Pick<Redis, "status" | "once" | "off">,
+  options: { timeoutMs?: number } = {},
+): Promise<void> {
+  if (redis.status === "ready") return;
+
+  const timeoutMs = options.timeoutMs ?? 15_000;
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      redis.off("ready", onReady);
+      redis.off("end", onEnd);
+      redis.off("close", onEnd);
+      fn();
+    };
+
+    const onReady = () => finish(() => resolve());
+    const onEnd = () =>
+      finish(() =>
+        reject(
+          new Error(
+            `Redis connection closed before ready (status=${redis.status})`,
+          ),
+        ),
+      );
+
+    const timer = setTimeout(() => {
+      finish(() =>
+        reject(
+          new Error(
+            `Redis not ready within ${timeoutMs}ms (status=${redis.status})`,
+          ),
+        ),
+      );
+    }, timeoutMs);
+
+    redis.once("ready", onReady);
+    redis.once("end", onEnd);
+    redis.once("close", onEnd);
+
+    // Status may have flipped between the early return and listener attach.
+    if (redis.status === "ready") {
+      finish(() => resolve());
+    }
+  });
+}
+
 export function isRedisUnavailableError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
@@ -34,4 +94,3 @@ export function isRedisUnavailableError(error: unknown): boolean {
     message.includes("etimedout")
   );
 }
-

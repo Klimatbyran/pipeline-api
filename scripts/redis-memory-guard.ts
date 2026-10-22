@@ -17,7 +17,7 @@
  * hung Redis/BullMQ connection cannot block every future scheduled run forever
  * under concurrencyPolicy: Forbid — same failure mode as prune-runs-by-company.
  */
-import { getRedisClient } from '../src/lib/redis-client'
+import { getRedisClient, waitForRedisReady } from '../src/lib/redis-client'
 import { getRedisMemorySnapshot } from '../src/lib/redisMemory'
 import {
   DEFAULT_REDIS_MEMORY_ALERT_RATIO,
@@ -152,6 +152,8 @@ async function main() {
   const discordConfigured = webhookConfigured()
 
   const redis = getRedisClient()
+  // enableOfflineQueue:false — must not INFO before the handshake completes.
+  await waitForRedisReady(redis)
   const snapshot = await getRedisMemorySnapshot(redis)
   const decision = evaluateRedisMemoryGuard(snapshot, {
     alertRatio,
