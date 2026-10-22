@@ -48,20 +48,10 @@ export async function waitForRedisReady(
       settled = true;
       clearTimeout(timer);
       redis.off("ready", onReady);
-      redis.off("end", onEnd);
-      redis.off("close", onEnd);
       fn();
     };
 
     const onReady = () => finish(() => resolve());
-    const onEnd = () =>
-      finish(() =>
-        reject(
-          new Error(
-            `Redis connection closed before ready (status=${redis.status})`,
-          ),
-        ),
-      );
 
     const timer = setTimeout(() => {
       finish(() =>
@@ -73,9 +63,10 @@ export async function waitForRedisReady(
       );
     }, timeoutMs);
 
+    // Only wait for `ready`. Do not reject on `close` — ioredis emits that
+    // during normal reconnect while retryStrategy is still trying, and a
+    // later attempt can still reach ready within the timeout.
     redis.once("ready", onReady);
-    redis.once("end", onEnd);
-    redis.once("close", onEnd);
 
     // Status may have flipped between the early return and listener attach.
     if (redis.status === "ready") {

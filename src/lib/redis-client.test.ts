@@ -35,4 +35,15 @@ describe('waitForRedisReady', () => {
       /not ready within 20ms/,
     )
   })
+
+  it('ignores close during reconnect and still resolves on ready', async () => {
+    const redis = createFakeRedis('connecting')
+    const pending = waitForRedisReady(redis, { timeoutMs: 500 })
+    redis.emit('close')
+    setTimeout(() => {
+      redis.status = 'ready'
+      redis.emit('ready')
+    }, 10)
+    await pending
+  })
 })
