@@ -127,6 +127,11 @@ export type SelectRunsToPruneOptions = {
   /** When set, limits pruning to one company (manual script only). Default is global. */
   companyName?: string;
   excludeThreadId?: string;
+  /**
+   * Emergency path only: also select runs that still have live/active jobs.
+   * Default false — normal prune/clear never touches in-flight work.
+   */
+  includeLive?: boolean;
 };
 
 export type SelectThreadIdsToClearResult = PruneSelectionResult & {
@@ -246,7 +251,7 @@ function pruneRunGroup(
 
   let skippedLiveRuns = state.skippedLiveRunsRef();
   for (const run of sorted) {
-    if (run.hasLiveJob) {
+    if (run.hasLiveJob && !options.includeLive) {
       skippedLiveRuns += 1;
       continue;
     }

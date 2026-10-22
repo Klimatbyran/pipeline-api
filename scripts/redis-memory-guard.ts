@@ -1,13 +1,17 @@
 /**
  * Periodic Redis memory guard for BullMQ.
  *
- * - At >= 70% of maxmemory: emit a loud alert log (and optional Discord webhook).
- * - At >= 80%: prune every non-live (terminal) pipeline run — completed,
- *   failed, skipped — so Redis can recover. Live/active runs are never removed.
+ * - At >= 60% of maxmemory: emit a loud alert log (and optional Discord webhook).
+ * - At >= 70%: prune every non-live (terminal) pipeline run — completed,
+ *   failed, skipped — so Redis can recover. Live/active runs are never removed
+ *   on this path.
+ * - At >= 85%: emergency fail-safe — clear every pipeline run including live /
+ *   active / waiting jobs (unlock + remove). Prefer interrupting in-flight
+ *   work over Redis OOM / noeviction write failures.
  *
  * Unlike the garbo post-success prune hook (which only fires on successful /
- * no-emissions finishes) and the nightly keep-15 cron, the 80% path clears
- * *all* finished work. Rerunning a report is cheaper than Redis OOM.
+ * no-emissions finishes) and the nightly keep-15 cron, the 70% path clears
+ * *all* finished work. The 85% path goes further and kills live runs too.
  *
  * Runtime is bounded (see MAX_RUNTIME_MS + CronJob activeDeadlineSeconds) so a
  * hung Redis/BullMQ connection cannot block every future 5-minute run forever
@@ -17,6 +21,7 @@ import { getRedisClient } from '../src/lib/redis-client'
 import { getRedisMemorySnapshot } from '../src/lib/redisMemory'
 import {
   DEFAULT_REDIS_MEMORY_ALERT_RATIO,
+  DEFAULT_REDIS_MEMORY_FORCE_CLEAR_RATIO,
   DEFAULT_REDIS_MEMORY_PRUNE_RATIO,
   evaluateRedisMemoryGuard,
   formatMemoryMiB,
@@ -27,7 +32,7 @@ import { RunRetentionService } from '../src/services/RunRetentionService'
 const MAX_RUNTIME_MS = 2 * 60 * 1000
 const WEBHOOK_TIMEOUT_MS = 8_000
 const ALERT_COOLDOWN_KEY = 'pipeline-api:redis-memory-guard:alert'
-/** Default: at most one Discord webhook per hour while stuck in 70–80%. */
+/** Default: at most one Discord webhook per hour while stuck in alert-only band. */
 const DEFAULT_ALERT_COOLDOWN_SECONDS = 60 * 60
 
 function readRatioEnv(name: string, fallback: number): number {
@@ -103,6 +108,10 @@ async function main() {
     'REDIS_MEMORY_PRUNE_RATIO',
     DEFAULT_REDIS_MEMORY_PRUNE_RATIO,
   )
+  const forceClearRatio = readRatioEnv(
+    'REDIS_MEMORY_FORCE_CLEAR_RATIO',
+    DEFAULT_REDIS_MEMORY_FORCE_CLEAR_RATIO,
+  )
   const alertCooldownSeconds = readPositiveIntEnv(
     'REDIS_MEMORY_ALERT_COOLDOWN_SECONDS',
     DEFAULT_ALERT_COOLDOWN_SECONDS,
@@ -114,6 +123,7 @@ async function main() {
   const decision = evaluateRedisMemoryGuard(snapshot, {
     alertRatio,
     pruneRatio,
+    forceClearRatio,
   })
 
   const ratioLabel =
@@ -125,6 +135,7 @@ async function main() {
     ratio: ratioLabel,
     alertRatio,
     pruneRatio,
+    forceClearRatio,
     dryRun,
     skipReason: decision.skipReason,
   })
@@ -140,12 +151,18 @@ async function main() {
   }
 
   if (decision.shouldAlert) {
-    const message = [
-      '🚨 Redis memory pressure',
-      `${ratioLabel} used (${formatMemoryMiB(decision.usedMemoryBytes)} / ${formatMemoryMiB(decision.maxMemoryBytes)})`,
-      decision.shouldPruneAllTerminal
+    const actionLabel = decision.shouldForceClearAll
+      ? `≥ ${formatRatioPercent(forceClearRatio)} — FORCE-clearing ALL BullMQ runs (including live/active)`
+      : decision.shouldPruneAllTerminal
         ? `≥ ${formatRatioPercent(pruneRatio)} — pruning all non-active BullMQ runs`
-        : `≥ ${formatRatioPercent(alertRatio)} alert threshold`,
+        : `≥ ${formatRatioPercent(alertRatio)} alert threshold`
+
+    const message = [
+      decision.shouldForceClearAll
+        ? '🚨 Redis memory FAIL-SAFE'
+        : '🚨 Redis memory pressure',
+      `${ratioLabel} used (${formatMemoryMiB(decision.usedMemoryBytes)} / ${formatMemoryMiB(decision.maxMemoryBytes)})`,
+      actionLabel,
       dryRun ? '(dry-run)' : '',
     ]
       .filter(Boolean)
@@ -153,8 +170,9 @@ async function main() {
 
     console.error(`[RedisMemoryGuard] ALERT ${message}`)
 
-    // Always notify on emergency prune; otherwise at most once per cooldown.
+    // Always notify on prune / force-clear; otherwise at most once per cooldown.
     const shouldWebhook =
+      decision.shouldForceClearAll ||
       decision.shouldPruneAllTerminal ||
       (await claimAlertWebhookSlot(redis, alertCooldownSeconds))
     if (shouldWebhook) {
@@ -166,7 +184,11 @@ async function main() {
     }
   }
 
-  if (decision.shouldPruneAllTerminal) {
+  if (decision.shouldForceClearAll) {
+    const service = await RunRetentionService.getRunRetentionService()
+    const result = await service.forceClearAllRuns({ dryRun })
+    console.info('[RedisMemoryGuard] emergency force-clear result', result)
+  } else if (decision.shouldPruneAllTerminal) {
     const service = await RunRetentionService.getRunRetentionService()
     // keepCount 0 = no protected terminal runs; live runs are still skipped.
     const result = await service.pruneRuns({ keepCount: 0, dryRun })

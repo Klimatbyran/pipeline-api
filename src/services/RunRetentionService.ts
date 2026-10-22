@@ -14,6 +14,11 @@ import { QueueService } from "./QueueService";
 export type PruneRunsOptions = SelectRunsToPruneOptions & {
   keepCount?: number;
   dryRun?: boolean;
+  /**
+   * When true with includeLive, unlock locked (active) jobs before remove so
+   * in-flight work can be deleted. Used only by the Redis memory fail-safe.
+   */
+  forceRemoveLocked?: boolean;
 };
 
 export type PruneRunsResult = {
@@ -72,18 +77,58 @@ export class RunRetentionService {
     return new RunRetentionService(queueService);
   }
 
-  private async removeJobRef(ref: RetentionJobRef): Promise<boolean> {
+  /**
+   * Drop BullMQ locks for a job (and its dependency tree) so a locked/active
+   * job can be removed. Emergency fail-safe only — workers may error on
+   * completion after this.
+   */
+  private async clearJobLocks(
+    queue: Awaited<ReturnType<QueueService["getQueue"]>>,
+    jobId: string,
+  ): Promise<void> {
+    const client = await queue.client;
+    const jobKey = queue.toKey(jobId);
+    const visited = new Set<string>();
+    const stack = [jobKey];
+
+    while (stack.length > 0) {
+      const key = stack.pop()!;
+      if (visited.has(key)) continue;
+      visited.add(key);
+
+      await client.del(`${key}:lock`);
+      const deps = await client.smembers(`${key}:dependencies`);
+      for (const depKey of deps) {
+        if (typeof depKey === "string" && depKey.length > 0) {
+          stack.push(depKey);
+        }
+      }
+    }
+  }
+
+  private async removeJobRef(
+    ref: RetentionJobRef,
+    forceRemoveLocked = false,
+  ): Promise<boolean> {
     try {
       const queue = await this.queueService.getQueue(ref.queue);
       const job = await queue.getJob(ref.id);
       if (!job) return false;
-      await job.remove();
-      return true;
+      try {
+        await job.remove({ removeChildren: true });
+        return true;
+      } catch (error) {
+        if (!forceRemoveLocked) throw error;
+        await this.clearJobLocks(queue, ref.id);
+        await job.remove({ removeChildren: true });
+        return true;
+      }
     } catch (error) {
       console.error("[RunRetentionService] failed to remove job", {
         queue: ref.queue,
         jobId: ref.id,
         threadId: ref.threadId,
+        forceRemoveLocked,
         error,
       });
       return false;
@@ -118,6 +163,7 @@ export class RunRetentionService {
   private async applySelection(
     selection: PruneSelectionResult,
     dryRun: boolean,
+    forceRemoveLocked = false,
   ): Promise<{
     jobsRemoved: number;
     prunedThreadIds: string[];
@@ -140,7 +186,7 @@ export class RunRetentionService {
         const pending = [...refs];
 
         for (const ref of pending) {
-          if (await this.removeJobRef(ref)) {
+          if (await this.removeJobRef(ref, forceRemoveLocked)) {
             jobsRemoved += 1;
           }
         }
@@ -153,7 +199,7 @@ export class RunRetentionService {
         }
 
         for (const ref of stillPending) {
-          if (await this.removeJobRef(ref)) {
+          if (await this.removeJobRef(ref, forceRemoveLocked)) {
             jobsRemoved += 1;
           }
         }
@@ -181,12 +227,15 @@ export class RunRetentionService {
   public async pruneRuns(options: PruneRunsOptions = {}): Promise<PruneRunsResult> {
     const keepCount = options.keepCount ?? DEFAULT_KEEP_RUN_COUNT;
     const dryRun = options.dryRun ?? false;
+    const includeLive = options.includeLive === true;
+    const forceRemoveLocked = options.forceRemoveLocked === true;
 
     const runs = await this.loadRunSummaries();
     const selection = selectRunsToPrune(runs, {
       keepCount,
       companyName: options.companyName,
       excludeThreadId: options.excludeThreadId,
+      includeLive,
     });
 
     const companiesProcessed = new Set(
@@ -198,13 +247,19 @@ export class RunRetentionService {
       ).map((run) => run.companyKey),
     ).size;
 
-    const applied = await this.applySelection(selection, dryRun);
+    const applied = await this.applySelection(
+      selection,
+      dryRun,
+      forceRemoveLocked,
+    );
 
     console.info("[RunRetentionService] pruneRuns", {
       dryRun,
       companyName: options.companyName ?? null,
       excludeThreadId: options.excludeThreadId ?? null,
       keepCount,
+      includeLive,
+      forceRemoveLocked,
       companiesProcessed,
       runsPruned: applied.prunedThreadIds.length,
       partialPruneThreadIds: applied.partialPruneThreadIds,
@@ -221,6 +276,22 @@ export class RunRetentionService {
       prunedThreadIds: applied.prunedThreadIds,
       dryRun,
     };
+  }
+
+  /**
+   * Redis memory fail-safe: remove every pipeline run with a threadId,
+   * including live/active jobs. Unlocks active jobs so BullMQ will allow
+   * removal. Does not touch jobs without a threadId (e.g. infra ticks).
+   */
+  public async forceClearAllRuns(options: {
+    dryRun?: boolean;
+  } = {}): Promise<PruneRunsResult> {
+    return this.pruneRuns({
+      keepCount: 0,
+      includeLive: true,
+      forceRemoveLocked: true,
+      dryRun: options.dryRun,
+    });
   }
 
   /**
