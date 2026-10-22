@@ -14,7 +14,7 @@
  * *all* finished work. The 85% path goes further and kills live runs too.
  *
  * Runtime is bounded (see MAX_RUNTIME_MS + CronJob activeDeadlineSeconds) so a
- * hung Redis/BullMQ connection cannot block every future 5-minute run forever
+ * hung Redis/BullMQ connection cannot block every future scheduled run forever
  * under concurrencyPolicy: Forbid — same failure mode as prune-runs-by-company.
  */
 import { getRedisClient } from '../src/lib/redis-client'

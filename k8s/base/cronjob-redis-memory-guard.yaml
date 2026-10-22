@@ -4,8 +4,10 @@ metadata:
   name: pipeline-api-redis-memory-guard
 spec:
   # Frequent enough to catch Redis filling before maxmemory / noeviction fails writes.
-  schedule: "*/5 * * * *"
+  schedule: "*/3 * * * *"
   concurrencyPolicy: Forbid
+  # Keep only the last N finished Jobs (and their Pods); older ones are GC'd
+  # by the CronJob controller as soon as a newer run completes.
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   jobTemplate:
