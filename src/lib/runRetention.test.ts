@@ -118,6 +118,37 @@ describe("runRetention", () => {
     assert.equal(selection.protectedThreadIds.length, 0);
   });
 
+  it("includeLive selects active runs when keepCount is 0", () => {
+    const summaries = buildRunSummaries([
+      job({
+        id: "live-1",
+        threadId: "live-run",
+        companyName: "Acme AB",
+        status: "active",
+        timestamp: 100,
+      }),
+      job({
+        id: "done-1",
+        threadId: "done-run",
+        companyName: "Beta AB",
+        status: "completed",
+        finishedOn: 200,
+        timestamp: 200,
+      }),
+    ]);
+
+    const selection = selectRunsToPrune(summaries, {
+      keepCount: 0,
+      includeLive: true,
+    });
+
+    assert.deepEqual(
+      [...selection.threadIdsToPrune].sort(),
+      ["done-run", "live-run"],
+    );
+    assert.equal(selection.skippedLiveRuns, 0);
+  });
+
   it("never prunes runs with any live job", () => {
     const summaries = buildRunSummaries([
       job({

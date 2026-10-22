@@ -4,6 +4,7 @@ import { describe, it } from 'node:test'
 import { parseRedisMemoryInfo } from './redisMemory'
 import {
   DEFAULT_REDIS_MEMORY_ALERT_RATIO,
+  DEFAULT_REDIS_MEMORY_FORCE_CLEAR_RATIO,
   DEFAULT_REDIS_MEMORY_PRUNE_RATIO,
   evaluateRedisMemoryGuard,
 } from './redisMemoryGuard'
@@ -31,7 +32,20 @@ describe('parseRedisMemoryInfo', () => {
 })
 
 describe('evaluateRedisMemoryGuard', () => {
-  it('alerts at 70% and does not prune yet', () => {
+  it('alerts at 60% and does not prune yet', () => {
+    const decision = evaluateRedisMemoryGuard({
+      usedMemoryBytes: 2_500_000_000,
+      maxMemoryBytes: 4_000_000_000,
+      ratio: 0.625,
+    })
+
+    assert.equal(decision.shouldAlert, true)
+    assert.equal(decision.shouldPruneAllTerminal, false)
+    assert.equal(decision.shouldForceClearAll, false)
+    assert.equal(decision.skipReason, null)
+  })
+
+  it('prunes all terminal runs at 70% but does not force-clear', () => {
     const decision = evaluateRedisMemoryGuard({
       usedMemoryBytes: 3_000_000_000,
       maxMemoryBytes: 4_000_000_000,
@@ -39,19 +53,20 @@ describe('evaluateRedisMemoryGuard', () => {
     })
 
     assert.equal(decision.shouldAlert, true)
-    assert.equal(decision.shouldPruneAllTerminal, false)
-    assert.equal(decision.skipReason, null)
+    assert.equal(decision.shouldPruneAllTerminal, true)
+    assert.equal(decision.shouldForceClearAll, false)
   })
 
-  it('prunes all terminal runs at 80%', () => {
+  it('force-clears all runs at 85%', () => {
     const decision = evaluateRedisMemoryGuard({
-      usedMemoryBytes: 3_400_000_000,
+      usedMemoryBytes: 3_500_000_000,
       maxMemoryBytes: 4_000_000_000,
-      ratio: 0.85,
+      ratio: 0.875,
     })
 
     assert.equal(decision.shouldAlert, true)
     assert.equal(decision.shouldPruneAllTerminal, true)
+    assert.equal(decision.shouldForceClearAll, true)
   })
 
   it('stays quiet below the alert threshold', () => {
@@ -63,6 +78,7 @@ describe('evaluateRedisMemoryGuard', () => {
 
     assert.equal(decision.shouldAlert, false)
     assert.equal(decision.shouldPruneAllTerminal, false)
+    assert.equal(decision.shouldForceClearAll, false)
   })
 
   it('skips when maxmemory is unset', () => {
@@ -74,11 +90,13 @@ describe('evaluateRedisMemoryGuard', () => {
 
     assert.equal(decision.shouldAlert, false)
     assert.equal(decision.shouldPruneAllTerminal, false)
+    assert.equal(decision.shouldForceClearAll, false)
     assert.match(decision.skipReason ?? '', /maxmemory/)
   })
 
   it('uses default thresholds', () => {
-    assert.equal(DEFAULT_REDIS_MEMORY_ALERT_RATIO, 0.7)
-    assert.equal(DEFAULT_REDIS_MEMORY_PRUNE_RATIO, 0.8)
+    assert.equal(DEFAULT_REDIS_MEMORY_ALERT_RATIO, 0.6)
+    assert.equal(DEFAULT_REDIS_MEMORY_PRUNE_RATIO, 0.7)
+    assert.equal(DEFAULT_REDIS_MEMORY_FORCE_CLEAR_RATIO, 0.85)
   })
 })

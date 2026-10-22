@@ -4,8 +4,10 @@ metadata:
   name: pipeline-api-redis-memory-guard
 spec:
   # Frequent enough to catch Redis filling before maxmemory / noeviction fails writes.
-  schedule: "*/5 * * * *"
+  schedule: "*/3 * * * *"
   concurrencyPolicy: Forbid
+  # Keep only the last N finished Jobs (and their Pods); older ones are GC'd
+  # by the CronJob controller as soon as a newer run completes.
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   jobTemplate:
@@ -30,10 +32,12 @@ spec:
                 - name: REDIS_HOST
                   value: redis-master.garbo-stage.svc.cluster.local
                 - name: REDIS_MEMORY_ALERT_RATIO
-                  value: "0.7"
+                  value: "0.6"
                 - name: REDIS_MEMORY_PRUNE_RATIO
-                  value: "0.8"
-                # Optional Discord incoming webhook for >=70% alerts (throttled).
+                  value: "0.7"
+                - name: REDIS_MEMORY_FORCE_CLEAR_RATIO
+                  value: "0.85"
+                # Optional Discord incoming webhook for >=60% alerts (throttled).
                 - name: REDIS_MEMORY_ALERT_WEBHOOK_URL
                   valueFrom:
                     secretKeyRef:
