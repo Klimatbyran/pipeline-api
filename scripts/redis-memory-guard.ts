@@ -30,7 +30,13 @@ import {
 import { RunRetentionService } from '../src/services/RunRetentionService'
 import type { PruneRunsResult } from '../src/services/RunRetentionService'
 
-const MAX_RUNTIME_MS = 2 * 60 * 1000
+/**
+ * Quiet ticks finish in seconds. Terminal prune and especially the 85%
+ * force-clear (unlock + remove every live job) can take minutes under load.
+ * Stay under CronJob activeDeadlineSeconds (600) so k8s kills us first only
+ * as a last resort; concurrencyPolicy: Forbid still prevents overlap.
+ */
+const MAX_RUNTIME_MS = 8 * 60 * 1000
 const WEBHOOK_TIMEOUT_MS = 8_000
 const ALERT_COOLDOWN_KEY = 'pipeline-api:redis-memory-guard:alert'
 /** Default: at most one Discord webhook per hour while stuck in alert-only band. */
