@@ -3,13 +3,25 @@ import jwt from "jsonwebtoken";
 import apiConfig from "../config/api";
 
 /**
+ * Normalize the request path for auth checks: strip query/hash, URL-decode when valid.
+ */
+export function normalizeRequestPath(url: string): string {
+  const pathOnly = url.split("?")[0].split("#")[0];
+  try {
+    return decodeURIComponent(pathOnly);
+  } catch {
+    return pathOnly;
+  }
+}
+
+/**
  * JWT Token Validation Middleware
  *
- * Validates JWT tokens from the Authorization header.
- * Used to protect write operations (POST, PUT, PATCH, DELETE) to prevent
- * unauthorized pipeline triggers and modifications.
+ * Validates JWT tokens from the Authorization header for protected API routes
+ * (all HTTP methods). Prevents unauthorized access to pipeline data and mutations.
  *
- * Read operations (GET) are unprotected - frontend handles auth for UX.
+ * Skipped when NODE_ENV is `development` (see app onRequest hook). Staging and
+ * production must not run with NODE_ENV=development.
  *
  * Token format: Authorization: Bearer <token>
  */
@@ -35,7 +47,7 @@ export async function validateJWT(
     if (!apiConfig.jwtSecret) {
       reply.status(500).send({
         error: "JWT authentication not configured",
-        message: "JWT_SECRET environment variable is required for write operations.",
+        message: "JWT_SECRET environment variable is required for protected API routes.",
       });
       return;
     }
