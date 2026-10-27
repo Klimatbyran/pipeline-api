@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   RetentionJobRef,
   buildRunSummaries,
+  classifyRunOutcome,
   deriveCompanyKey,
   selectRunsToPrune,
   selectThreadIdsToClear,
@@ -246,5 +247,98 @@ describe("runRetention", () => {
     assert.deepEqual(selection.skippedLiveThreadIds, ["live-me"]);
     assert.deepEqual(selection.notFoundThreadIds, ["missing"]);
     assert.ok(!selection.threadIdsToPrune.includes("keep-me"));
+  });
+
+  it("outcome policy keeps 5 newest successful and failed within max age", () => {
+    // Use a real epoch so finishedOn stays > 0 (runSortMs ignores non-positive).
+    const nowMs = Date.UTC(2026, 9, 27, 12, 0, 0);
+    const dayMs = 24 * 60 * 60 * 1000;
+    const refs: RetentionJobRef[] = [];
+
+    for (let i = 1; i <= 7; i++) {
+      refs.push(
+        job({
+          id: `ok-${i}`,
+          threadId: `success-${i}`,
+          companyName: `Co ${i}`,
+          status: "completed",
+          finishedOn: nowMs - i * 1000,
+          timestamp: nowMs - i * 1000,
+        }),
+      );
+    }
+
+    refs.push(
+      job({
+        id: "fail-recent",
+        threadId: "failed-recent",
+        companyName: "Fail Co",
+        status: "failed",
+        finishedOn: nowMs - 60_000,
+        timestamp: nowMs - 60_000,
+      }),
+      job({
+        id: "fail-old",
+        threadId: "failed-old",
+        companyName: "Fail Co",
+        status: "failed",
+        finishedOn: nowMs - dayMs - 1000,
+        timestamp: nowMs - dayMs - 1000,
+      }),
+      job({
+        id: "live",
+        threadId: "live-run",
+        companyName: "Live Co",
+        status: "active",
+        timestamp: nowMs,
+      }),
+    );
+
+    const summaries = buildRunSummaries(refs);
+    const selection = selectRunsToPrune(summaries, {
+      keepSuccessfulCount: 5,
+      failedMaxAgeMs: dayMs,
+      nowMs,
+    });
+
+    assert.equal(classifyRunOutcome(summaries.find((r) => r.threadId === "failed-recent")!), "failed");
+    assert.equal(classifyRunOutcome(summaries.find((r) => r.threadId === "success-1")!), "successful");
+
+    // Newest 5 successes protected (success-1 .. success-5); 6 and 7 pruned.
+    assert.ok(selection.protectedThreadIds.includes("success-1"));
+    assert.ok(selection.protectedThreadIds.includes("success-5"));
+    assert.ok(selection.threadIdsToPrune.includes("success-6"));
+    assert.ok(selection.threadIdsToPrune.includes("success-7"));
+
+    assert.ok(selection.protectedThreadIds.includes("failed-recent"));
+    assert.ok(selection.threadIdsToPrune.includes("failed-old"));
+    assert.ok(!selection.threadIdsToPrune.includes("live-run"));
+    assert.equal(selection.skippedLiveRuns, 1);
+  });
+
+  it("default outcome policy matches keep 5 successful / 24h failed", () => {
+    const nowMs = Date.UTC(2026, 9, 27, 12, 0, 0);
+    const summaries = buildRunSummaries([
+      job({
+        id: "old-ok",
+        threadId: "old-success",
+        status: "completed",
+        finishedOn: nowMs - 10_000,
+        timestamp: nowMs - 10_000,
+      }),
+      ...Array.from({ length: 5 }, (_, i) =>
+        job({
+          id: `keep-${i}`,
+          threadId: `keep-success-${i}`,
+          status: "completed",
+          finishedOn: nowMs - i * 100,
+          timestamp: nowMs - i * 100,
+        }),
+      ),
+    ]);
+
+    const selection = selectRunsToPrune(summaries, { nowMs });
+    assert.ok(selection.threadIdsToPrune.includes("old-success"));
+    assert.equal(selection.threadIdsToPrune.length, 1);
   });
 });

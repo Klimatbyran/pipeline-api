@@ -32,7 +32,7 @@ export async function internalPruneRunsRoute(app: FastifyInstance) {
         200: pruneRunsResponseSchema,
       },
       description:
-        "Prune terminal pipeline runs beyond the Redis retention cap. keepCount 0 removes every non-live (completed/failed) run.",
+        "Prune terminal pipeline runs. Omit keepCount for outcome policy (keep 5 successful, failed max age 24h). keepCount 0 removes every non-live (completed/failed) run.",
       tags: ["Internal"],
     },
     handler: async (request) => {

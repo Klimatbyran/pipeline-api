@@ -1,6 +1,7 @@
 import { DataJob } from "../schemas/types";
 import {
-  DEFAULT_KEEP_RUN_COUNT,
+  DEFAULT_FAILED_MAX_AGE_MS,
+  DEFAULT_KEEP_SUCCESSFUL_RUN_COUNT,
   PruneSelectionResult,
   RetentionJobRef,
   SelectRunsToPruneOptions,
@@ -12,7 +13,6 @@ import {
 import { QueueService } from "./QueueService";
 
 export type PruneRunsOptions = SelectRunsToPruneOptions & {
-  keepCount?: number;
   dryRun?: boolean;
   /**
    * When true with includeLive, unlock locked (active) jobs before remove so
@@ -225,14 +225,24 @@ export class RunRetentionService {
   }
 
   public async pruneRuns(options: PruneRunsOptions = {}): Promise<PruneRunsResult> {
-    const keepCount = options.keepCount ?? DEFAULT_KEEP_RUN_COUNT;
     const dryRun = options.dryRun ?? false;
     const includeLive = options.includeLive === true;
     const forceRemoveLocked = options.forceRemoveLocked === true;
+    // Explicit keepCount (incl. 0) → legacy global keep. Otherwise outcome
+    // policy: keep N successful, prune failed older than max age.
+    const useLegacyKeepCount = options.keepCount !== undefined;
 
     const runs = await this.loadRunSummaries();
     const selection = selectRunsToPrune(runs, {
-      keepCount,
+      ...(useLegacyKeepCount
+        ? { keepCount: options.keepCount }
+        : {
+            keepSuccessfulCount:
+              options.keepSuccessfulCount ?? DEFAULT_KEEP_SUCCESSFUL_RUN_COUNT,
+            failedMaxAgeMs:
+              options.failedMaxAgeMs ?? DEFAULT_FAILED_MAX_AGE_MS,
+            nowMs: options.nowMs,
+          }),
       companyName: options.companyName,
       excludeThreadId: options.excludeThreadId,
       includeLive,
@@ -257,7 +267,13 @@ export class RunRetentionService {
       dryRun,
       companyName: options.companyName ?? null,
       excludeThreadId: options.excludeThreadId ?? null,
-      keepCount,
+      keepCount: useLegacyKeepCount ? options.keepCount : null,
+      keepSuccessfulCount: useLegacyKeepCount
+        ? null
+        : (options.keepSuccessfulCount ?? DEFAULT_KEEP_SUCCESSFUL_RUN_COUNT),
+      failedMaxAgeMs: useLegacyKeepCount
+        ? null
+        : (options.failedMaxAgeMs ?? DEFAULT_FAILED_MAX_AGE_MS),
       includeLive,
       forceRemoveLocked,
       companiesProcessed,
