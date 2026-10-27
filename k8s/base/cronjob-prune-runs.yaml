@@ -3,7 +3,13 @@ kind: CronJob
 metadata:
   name: pipeline-api-prune-runs
 spec:
-  schedule: "0 3 * * *"
+  # Routine retention: keep 5 newest successful/skipped runs; prune failed
+  # runs older than 24h. Live runs are never touched. (Memory-guard still
+  # does emergency keepCount=0 / force-clear under Redis pressure.)
+  # Stagger vs memory-guard (*/3 → :00,:03,:06,…): run at :05,:15,… so the
+  # two CronJobs almost never start together. Remaining overlaps (:15,:45)
+  # are rare; both use concurrencyPolicy Forbid.
+  schedule: "5,15,25,35,45,55 * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

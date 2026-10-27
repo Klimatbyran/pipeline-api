@@ -1,3 +1,5 @@
+import { NON_BLOCKING_FAILURE_QUEUES } from "./bullmq";
+
 export const LIVE_JOB_STATUSES = new Set([
   "active",
   "waiting",
@@ -8,10 +10,18 @@ export const LIVE_JOB_STATUSES = new Set([
 ]);
 
 /** Job-level terminals. Emissions-gate skips complete as `completed` (with
- * gated:true returnvalue) — they are pruned like any other finished run. */
+ * gated:true returnvalue) — they count as successful for retention. */
 export const TERMINAL_JOB_STATUSES = new Set(["completed", "failed"]);
 
+/** @deprecated Prefer keepSuccessfulCount + failedMaxAgeMs. Kept for
+ * emergency keepCount:0 / explicit legacy callers. */
 export const DEFAULT_KEEP_RUN_COUNT = 15;
+
+/** Routine cron: newest successful / skipped runs to keep globally. */
+export const DEFAULT_KEEP_SUCCESSFUL_RUN_COUNT = 5;
+
+/** Routine cron: failed runs older than this are pruned. */
+export const DEFAULT_FAILED_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export type RetentionJobRef = {
   id: string;
@@ -31,6 +41,8 @@ export type RunSummary = {
   hasLiveJob: boolean;
   jobRefs: RetentionJobRef[];
 };
+
+export type RunOutcome = "live" | "failed" | "successful";
 
 export type PruneSelectionResult = {
   threadIdsToPrune: string[];
@@ -98,6 +110,20 @@ export function buildRunSummaries(jobs: RetentionJobRef[]): RunSummary[] {
   return runs;
 }
 
+/**
+ * Classify a run for outcome-based retention.
+ * Failed = any blocking queue failure. Successful = terminal with no
+ * blocking failure (includes emissions-gate skips and completed runs).
+ */
+export function classifyRunOutcome(run: RunSummary): RunOutcome {
+  if (run.hasLiveJob) return "live";
+  const hasBlockingFailure = run.jobRefs.some(
+    (job) =>
+      job.status === "failed" && !NON_BLOCKING_FAILURE_QUEUES.has(job.queue),
+  );
+  return hasBlockingFailure ? "failed" : "successful";
+}
+
 export function companyKeyMatches(
   runCompanyKey: string,
   filterCompanyName: string,
@@ -123,7 +149,18 @@ export function runMatchesCompanyFilter(
 }
 
 export type SelectRunsToPruneOptions = {
+  /**
+   * Legacy global keep of newest terminal runs (any outcome). When set,
+   * outcome-based keepSuccessfulCount / failedMaxAgeMs are ignored.
+   * keepCount 0 = prune every non-live terminal run.
+   */
   keepCount?: number;
+  /** Newest successful/skipped runs to keep (routine cron). */
+  keepSuccessfulCount?: number;
+  /** Failed runs older than this (ms) are pruned (routine cron). */
+  failedMaxAgeMs?: number;
+  /** Clock for failedMaxAgeMs (tests). Defaults to Date.now(). */
+  nowMs?: number;
   /** When set, limits pruning to one company (manual script only). Default is global. */
   companyName?: string;
   excludeThreadId?: string;
@@ -187,34 +224,24 @@ export function selectRunsToPrune(
   runs: RunSummary[],
   options: SelectRunsToPruneOptions = {},
 ): PruneSelectionResult {
-  const keepCount = options.keepCount ?? DEFAULT_KEEP_RUN_COUNT;
-  const threadIdsToPrune = new Set<string>();
-  const protectedThreadIds = new Set<string>();
-  let skippedLiveRuns = 0;
+  const scoped =
+    options.companyName != null
+      ? runs.filter((run) => runMatchesCompanyFilter(run, options.companyName!))
+      : runs;
 
-  if (options.companyName) {
-    const filtered = runs.filter((run) =>
-      runMatchesCompanyFilter(run, options.companyName!),
-    );
-    pruneRunGroup(filtered, keepCount, options, {
-      threadIdsToPrune,
-      protectedThreadIds,
-      skippedLiveRunsRef: () => skippedLiveRuns,
-      setSkippedLiveRuns: (n) => {
-        skippedLiveRuns = n;
-      },
-    });
-  } else {
-    pruneRunGroup(runs, keepCount, options, {
-      threadIdsToPrune,
-      protectedThreadIds,
-      skippedLiveRunsRef: () => skippedLiveRuns,
-      setSkippedLiveRuns: (n) => {
-        skippedLiveRuns = n;
-      },
-    });
+  if (options.keepCount !== undefined) {
+    return selectRunsToPruneLegacy(scoped, options);
   }
 
+  return selectRunsToPruneByOutcome(scoped, options);
+}
+
+function selectionFromThreadIds(
+  runs: RunSummary[],
+  threadIdsToPrune: Set<string>,
+  protectedThreadIds: Set<string>,
+  skippedLiveRuns: number,
+): PruneSelectionResult {
   const jobRefsToRemove: RetentionJobRef[] = [];
   for (const run of runs) {
     if (!threadIdsToPrune.has(run.threadId)) continue;
@@ -229,27 +256,25 @@ export function selectRunsToPrune(
   };
 }
 
-function pruneRunGroup(
+/** Legacy: keep N newest terminal runs of any outcome. */
+function selectRunsToPruneLegacy(
   runs: RunSummary[],
-  keepCount: number,
   options: SelectRunsToPruneOptions,
-  state: {
-    threadIdsToPrune: Set<string>;
-    protectedThreadIds: Set<string>;
-    skippedLiveRunsRef: () => number;
-    setSkippedLiveRuns: (n: number) => void;
-  },
-): void {
+): PruneSelectionResult {
+  const keepCount = options.keepCount ?? DEFAULT_KEEP_RUN_COUNT;
+  const threadIdsToPrune = new Set<string>();
+  const protectedThreadIds = new Set<string>();
+  let skippedLiveRuns = 0;
+
   const sorted = [...runs].sort((a, b) => b.sortMs - a.sortMs);
   const protectedForGroup = new Set(
     sorted.slice(0, keepCount).map((run) => run.threadId),
   );
 
   for (const threadId of protectedForGroup) {
-    state.protectedThreadIds.add(threadId);
+    protectedThreadIds.add(threadId);
   }
 
-  let skippedLiveRuns = state.skippedLiveRunsRef();
   for (const run of sorted) {
     if (run.hasLiveJob && !options.includeLive) {
       skippedLiveRuns += 1;
@@ -257,7 +282,82 @@ function pruneRunGroup(
     }
     if (run.threadId === options.excludeThreadId) continue;
     if (protectedForGroup.has(run.threadId)) continue;
-    state.threadIdsToPrune.add(run.threadId);
+    threadIdsToPrune.add(run.threadId);
   }
-  state.setSkippedLiveRuns(skippedLiveRuns);
+
+  return selectionFromThreadIds(
+    runs,
+    threadIdsToPrune,
+    protectedThreadIds,
+    skippedLiveRuns,
+  );
+}
+
+/**
+ * Routine policy: keep newest N successful/skipped runs; prune failed runs
+ * older than failedMaxAgeMs; never touch live runs (unless includeLive).
+ */
+function selectRunsToPruneByOutcome(
+  runs: RunSummary[],
+  options: SelectRunsToPruneOptions,
+): PruneSelectionResult {
+  const keepSuccessfulCount =
+    options.keepSuccessfulCount ?? DEFAULT_KEEP_SUCCESSFUL_RUN_COUNT;
+  const failedMaxAgeMs =
+    options.failedMaxAgeMs ?? DEFAULT_FAILED_MAX_AGE_MS;
+  const nowMs = options.nowMs ?? Date.now();
+  const failedCutoffMs = nowMs - failedMaxAgeMs;
+
+  const threadIdsToPrune = new Set<string>();
+  const protectedThreadIds = new Set<string>();
+  let skippedLiveRuns = 0;
+
+  const successful: RunSummary[] = [];
+  const failed: RunSummary[] = [];
+
+  for (const run of runs) {
+    const outcome = classifyRunOutcome(run);
+    if (outcome === "live") {
+      // Live runs are only cleared via legacy keepCount + includeLive
+      // (memory-guard force-clear). Routine cron never touches them.
+      skippedLiveRuns += 1;
+      continue;
+    }
+    if (outcome === "failed") {
+      failed.push(run);
+    } else {
+      successful.push(run);
+    }
+  }
+
+  successful.sort((a, b) => b.sortMs - a.sortMs);
+  for (const run of successful.slice(0, keepSuccessfulCount)) {
+    if (run.threadId === options.excludeThreadId) continue;
+    protectedThreadIds.add(run.threadId);
+  }
+
+  for (const run of successful) {
+    if (run.threadId === options.excludeThreadId) continue;
+    if (protectedThreadIds.has(run.threadId)) continue;
+    threadIdsToPrune.add(run.threadId);
+  }
+
+  for (const run of failed) {
+    if (run.threadId === options.excludeThreadId) {
+      protectedThreadIds.add(run.threadId);
+      continue;
+    }
+    if (run.sortMs >= failedCutoffMs) {
+      protectedThreadIds.add(run.threadId);
+      continue;
+    }
+    threadIdsToPrune.add(run.threadId);
+  }
+
+  return selectionFromThreadIds(
+    runs,
+    threadIdsToPrune,
+    protectedThreadIds,
+    skippedLiveRuns,
+  );
 }

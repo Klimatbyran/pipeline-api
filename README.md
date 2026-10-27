@@ -112,12 +112,11 @@ BullMQ jobs live in the shared Garbo Redis (`maxmemory` + `noeviction` in prod).
 
 | Mechanism | When | What it keeps / removes |
 | --- | --- | --- |
-| Garbo prune hook | After a run **succeeds** or is **skipped (no emissions)** | Calls `POST /api/internal/prune-runs` with default keep count (15 newest terminal runs globally). **Does not fire on failed runs.** |
-| Nightly cron `pipeline-api-prune-runs` | `0 3 * * *` | Same keep-15 prune for all terminal runs (completed **and** failed). |
-| Memory guard cron `pipeline-api-redis-memory-guard` | Every 3 minutes | Reads Redis `INFO memory`. **≥60%**: alert log + optional Discord webhook (`REDIS_MEMORY_ALERT_WEBHOOK_URL` on Secret `env`, throttled by `REDIS_MEMORY_ALERT_COOLDOWN_SECONDS`, default 1h). **≥70%**: prune with `keepCount=0` — remove **every non-live** run (success, fail, skipped); Discord always fires **after** prune with run/job counts. **≥85%**: fail-safe force-clear — remove **every** pipeline run including live/active/waiting (unlocks active jobs); Discord always fires after with counts. Jobs without a `threadId` (e.g. infra ticks) are left alone. Keeps the last 3 successful + 3 failed Jobs/Pods. Each tick logs `discordWebhookConfigured`; missing webhook URL is a loud warn (not silent). |
+| Cron `pipeline-api-prune-runs` | Every 10 minutes at **:05,:15,:25,:35,:45,:55** (staggered vs memory-guard `*/3`) | **Outcome policy:** keep the **5 newest successful/skipped** runs globally; prune **failed** runs older than **24 hours**. Live/active runs are never removed. |
+| Memory guard cron `pipeline-api-redis-memory-guard` | Every 3 minutes (`:00,:03,:06,…`) | Reads Redis `INFO memory`. **≥60%**: alert log + optional Discord webhook (`REDIS_MEMORY_ALERT_WEBHOOK_URL` on Secret `env`, throttled by `REDIS_MEMORY_ALERT_COOLDOWN_SECONDS`, default 1h). **≥70%**: prune with `keepCount=0` — remove **every non-live** run (success, fail, skipped); Discord always fires **after** prune with run/job counts. **≥85%**: fail-safe force-clear — remove **every** pipeline run including live/active/waiting (unlocks active jobs); Discord always fires after with counts. Jobs without a `threadId` (e.g. infra ticks) are left alone. |
 | Staff clear `POST /api/runs/clear` (JWT) | Goffer Jobbstatus / manual | Clear selected `threadIds` or `{ "clearAllTerminal": true }` (same as keepCount 0). Active/waiting runs are never removed. |
 
-Local: `npm run redis-memory-guard` (add `--dry-run` to only report). Manual: `npm run prune-runs-by-company -- --keep=0`.
+Local: `npm run redis-memory-guard` (add `--dry-run` to only report). Manual: `npm run prune-runs-by-company` (outcome policy defaults), or `--keep=0` for legacy wipe-all-terminal, or `--keep-successful=5 --failed-max-age-hours=24`.
 
 ### Clearing finished runs (staff / Goffer)
 
