@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { RetentionJobRef } from "../lib/runRetention.js";
 import { DataJob } from "../schemas/types.js";
-import { QueueService } from "./QueueService.js";
+import {
+  QueueService,
+  retentionJobRefFromBullJob,
+} from "./QueueService.js";
 import { RunRetentionService } from "./RunRetentionService.js";
 
 type FakeJob = {
@@ -26,6 +30,23 @@ function dataJob(
   } as DataJob;
 }
 
+function toRetentionRef(job: DataJob): RetentionJobRef {
+  return {
+    id: job.id!,
+    queue: job.queue,
+    threadId: job.threadId!,
+    companyName:
+      typeof job.data?.companyName === "string"
+        ? job.data.companyName
+        : undefined,
+    companyId:
+      typeof job.data?.companyId === "string" ? job.data.companyId : undefined,
+    status: job.status,
+    finishedOn: job.finishedOn,
+    timestamp: job.timestamp,
+  };
+}
+
 function createService(
   jobs: DataJob[],
   options: { lockedJobIds?: Set<string> } = {},
@@ -35,8 +56,10 @@ function createService(
   const deletedLockKeys: string[] = [];
 
   const queueService = {
-    getDataJobs: async () =>
-      jobs.filter((job) => !removed.has(`${job.queue}:${job.id}`)),
+    getRetentionJobRefs: async () =>
+      jobs
+        .filter((job) => !removed.has(`${job.queue}:${job.id}`))
+        .map(toRetentionRef),
     getQueue: async (queueName: string) => ({
       toKey: (id: string) => `bull:${queueName}:${id}`,
       client: Promise.resolve({
@@ -75,6 +98,46 @@ function createService(
     deletedLockKeys,
   };
 }
+
+describe("retentionJobRefFromBullJob", () => {
+  it("keeps only retention fields and skips callbackUrl jobs", () => {
+    const kept = retentionJobRefFromBullJob(
+      {
+        id: "job-1",
+        data: {
+          threadId: "t1",
+          companyName: "Acme AB",
+          markdown: "x".repeat(10_000),
+        },
+        finishedOn: 123,
+        timestamp: 100,
+      },
+      "parsePdf",
+      "completed",
+    );
+    assert.deepEqual(kept, {
+      id: "job-1",
+      queue: "parsePdf",
+      threadId: "t1",
+      companyName: "Acme AB",
+      companyId: undefined,
+      status: "completed",
+      finishedOn: 123,
+      timestamp: 100,
+    });
+
+    const skipped = retentionJobRefFromBullJob(
+      {
+        id: "cb",
+        data: { threadId: "t2", callbackUrl: "https://example.com" },
+        timestamp: 1,
+      },
+      "parsePdf",
+      "completed",
+    );
+    assert.equal(skipped, null);
+  });
+});
 
 describe("RunRetentionService.clearRuns", () => {
   it("clears requested terminal thread ids and skips live / missing", async () => {

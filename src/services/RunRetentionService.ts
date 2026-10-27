@@ -1,4 +1,3 @@
-import { DataJob } from "../schemas/types";
 import {
   DEFAULT_FAILED_MAX_AGE_MS,
   DEFAULT_KEEP_SUCCESSFUL_RUN_COUNT,
@@ -43,27 +42,6 @@ export type ClearRunsResult = PruneRunsResult & {
   notFoundThreadIds: string[];
   skippedLiveThreadIds: string[];
 };
-
-function toRetentionJobRef(job: DataJob): RetentionJobRef | null {
-  const threadId =
-    job.threadId ?? job.data?.threadId ?? job.processId ?? undefined;
-  if (!threadId || !job.id) return null;
-
-  return {
-    id: job.id,
-    queue: job.queue,
-    threadId,
-    companyName:
-      typeof job.data?.companyName === "string"
-        ? job.data.companyName
-        : undefined,
-    companyId:
-      typeof job.data?.companyId === "string" ? job.data.companyId : undefined,
-    status: job.status,
-    finishedOn: job.finishedOn,
-    timestamp: job.timestamp,
-  };
-}
 
 export class RunRetentionService {
   private queueService: QueueService;
@@ -146,17 +124,9 @@ export class RunRetentionService {
   }
 
   private async loadRunSummaries() {
-    const allJobs = await this.queueService.getDataJobs(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      false,
-      "processList",
-    );
-    const retentionJobs = allJobs
-      .map(toRetentionJobRef)
-      .filter((job): job is RetentionJobRef => job != null);
+    // Lean sequential scan — do not use getDataJobs here (it fans out every
+    // queue in parallel and keeps full BullMQ Job payloads in memory).
+    const retentionJobs = await this.queueService.getRetentionJobRefs();
     return buildRunSummaries(retentionJobs);
   }
 

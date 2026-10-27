@@ -112,7 +112,7 @@ BullMQ jobs live in the shared Garbo Redis (`maxmemory` + `noeviction` in prod).
 
 | Mechanism | When | What it keeps / removes |
 | --- | --- | --- |
-| Cron `pipeline-api-prune-runs` | Every 10 minutes at **:05,:15,:25,:35,:45,:55** (staggered vs memory-guard `*/3`) | **Outcome policy:** keep the **5 newest successful/skipped** runs globally; prune **failed** runs older than **24 hours**. Live/active runs are never removed. |
+| Cron `pipeline-api-prune-runs` | Every 10 minutes at **:05,:15,:25,:35,:45,:55** (staggered vs memory-guard `*/3`) | **Outcome policy:** keep the **5 newest successful/skipped** runs globally; prune **failed** runs older than **24 hours**. Live/active runs are never removed. Loads retention refs via a sequential paged scan (`getRetentionJobRefs`) so the CronJob does not OOM holding every queue’s full BullMQ payloads at once. |
 | Memory guard cron `pipeline-api-redis-memory-guard` | Every 3 minutes (`:00,:03,:06,…`) | Reads Redis `INFO memory`. **≥60%**: alert log + optional Discord webhook (`REDIS_MEMORY_ALERT_WEBHOOK_URL` on Secret `env`, throttled by `REDIS_MEMORY_ALERT_COOLDOWN_SECONDS`, default 1h). **≥70%**: prune with `keepCount=0` — remove **every non-live** run (success, fail, skipped); Discord always fires **after** prune with run/job counts. **≥85%**: fail-safe force-clear — remove **every** pipeline run including live/active/waiting (unlocks active jobs); Discord always fires after with counts. Jobs without a `threadId` (e.g. infra ticks) are left alone. |
 | Staff clear `POST /api/runs/clear` (JWT) | Goffer Jobbstatus / manual | Clear selected `threadIds` or `{ "clearAllTerminal": true }` (same as keepCount 0). Active/waiting runs are never removed. |
 
