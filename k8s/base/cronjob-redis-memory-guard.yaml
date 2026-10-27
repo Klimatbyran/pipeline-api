@@ -23,6 +23,14 @@ spec:
             - name: redis-memory-guard
               image: ghcr.io/klimatbyran/pipeline-api
               command: ["npm", "run", "redis-memory-guard"]
+              # Match API deployment headroom: script uses --max-old-space-size=1536.
+              resources:
+                requests:
+                  memory: "768Mi"
+                  cpu: "100m"
+                limits:
+                  memory: "2Gi"
+                  cpu: "1000m"
               env:
                 - name: REDIS_PASSWORD
                   valueFrom:
