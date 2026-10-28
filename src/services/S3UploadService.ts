@@ -84,6 +84,14 @@ function sha256Hex(buffer: Buffer): string {
   return createHash('sha256').update(buffer).digest('hex');
 }
 
+/**
+ * S3/GCS object user-metadata values are sent as HTTP headers and must be US-ASCII.
+ * encodeURIComponent keeps a recoverable human trace for non-English filenames.
+ */
+export function encodeObjectMetadataValue(value: string): string {
+  return encodeURIComponent(value);
+}
+
 async function objectExists(params: { bucket: string; key: string }): Promise<boolean> {
   const s3 = getClient();
   try {
@@ -133,8 +141,10 @@ export async function uploadPdfAndGetUrls(
         Key: key,
         Body: buffer,
         ContentType: PDF_MIME,
-        // Keep a small trace for humans; not used for dedupe logic.
-        Metadata: filename ? { originalFilename: filename } : undefined,
+        // Keep a small ASCII-safe trace for humans; not used for dedupe logic.
+        Metadata: filename
+          ? { originalFilename: encodeObjectMetadataValue(filename) }
+          : undefined,
       })
     );
   }
