@@ -1207,7 +1207,8 @@ export async function transformJobtoBaseJob(job: Job): Promise<BaseJob> {
     processId: job.data.threadId ?? undefined,
     threadId: job.data.threadId ?? undefined,
     timestamp: job.timestamp,
-    processedOn: job.processedOn,
+    processedOn:
+      typeof job.processedOn === "number" ? job.processedOn : undefined,
     processedBy: job.processedBy,
     finishedOn: job.finishedOn,
     attemptsMade: job.attemptsMade,
