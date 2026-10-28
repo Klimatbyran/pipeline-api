@@ -1,5 +1,6 @@
 import { Job, JobType, Queue } from "bullmq";
 import startQueues, { JOB_STATUS, QUEUE_NAMES } from "../lib/bullmq";
+import type { RetentionJobRef } from "../lib/runRetention";
 import { BaseJob, DataJob, QueueStatus } from "../schemas/types";
 
 /**
@@ -184,6 +185,56 @@ export class QueueService {
     );
 
     return results.flat();
+  }
+
+  /**
+   * Lean job listing for Redis retention / prune scripts.
+   *
+   * Unlike getDataJobs (process list), this:
+   * - walks queues and statuses sequentially (no Promise.all fan-out)
+   * - pages through BullMQ and keeps only RetentionJobRef fields
+   * - assigns status from the list being scanned (no per-job getState)
+   * - never retains full Job / markdown-sized payloads across pages
+   *
+   * Peak memory stays roughly one page of Redis job hashes, not the whole
+   * dataset — important when prune CronJobs run with a modest heap.
+   */
+  public async getRetentionJobRefs(
+    options: { pageSize?: number } = {},
+  ): Promise<RetentionJobRef[]> {
+    const pageSize = options.pageSize ?? 50;
+    const queueNames = Object.values(QUEUE_NAMES);
+    const refs: RetentionJobRef[] = [];
+
+    for (const queueName of queueNames) {
+      const queue = await this.getQueue(queueName);
+      const counts = await queue.getJobCounts(...(JOB_STATUS as JobType[]));
+      if (Object.values(counts).every((c) => c === 0)) continue;
+
+      for (const status of JOB_STATUS) {
+        if ((counts[status] ?? 0) === 0) continue;
+
+        let start = 0;
+        while (true) {
+          const page = await queue.getJobs(
+            [status as JobType],
+            start,
+            start + pageSize - 1,
+          );
+          if (page.length === 0) break;
+
+          for (const job of page) {
+            const ref = retentionJobRefFromBullJob(job, queueName, status);
+            if (ref) refs.push(ref);
+          }
+
+          if (page.length < pageSize) break;
+          start += pageSize;
+        }
+      }
+    }
+
+    return refs;
   }
 
   public async addJob(
@@ -1071,6 +1122,42 @@ export class QueueService {
       }
     }
   }
+}
+
+/**
+ * Map a BullMQ job into the tiny retention ref. Skips callbackUrl hand-offs
+ * (same rule as getDataJobs) and jobs without a threadId.
+ */
+export function retentionJobRefFromBullJob(
+  job: Pick<Job, "id" | "data" | "finishedOn" | "timestamp">,
+  queueName: string,
+  status: string,
+): RetentionJobRef | null {
+  const data =
+    job.data && typeof job.data === "object"
+      ? (job.data as Record<string, unknown>)
+      : undefined;
+  if (data?.callbackUrl) return null;
+
+  const threadId =
+    (typeof data?.threadId === "string" && data.threadId) ||
+    (typeof data?.processId === "string" && data.processId) ||
+    undefined;
+  if (!threadId || !job.id) return null;
+
+  return {
+    id: String(job.id),
+    queue: queueName,
+    threadId,
+    companyName:
+      typeof data?.companyName === "string" ? data.companyName : undefined,
+    companyId:
+      typeof data?.companyId === "string" ? data.companyId : undefined,
+    status,
+    finishedOn:
+      typeof job.finishedOn === "number" ? job.finishedOn : undefined,
+    timestamp: typeof job.timestamp === "number" ? job.timestamp : 0,
+  };
 }
 
 /** Fields ProcessService / retention need for grouping — not full job.data. */

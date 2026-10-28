@@ -10,7 +10,9 @@ import { RunRetentionService } from "../src/services/RunRetentionService";
 // runtime — independent of *why* it might hang — fixes that regardless of
 // the specific cause; see also activeDeadlineSeconds on the CronJob itself
 // as a second, Kubernetes-level backstop.
-const MAX_RUNTIME_MS = 3 * 60 * 1000;
+// Sequential retention scan can take longer than a parallel getDataJobs load;
+// stay under CronJob activeDeadlineSeconds (600s).
+const MAX_RUNTIME_MS = 8 * 60 * 1000;
 
 function readArg(name: string): string | undefined {
   const prefix = `--${name}=`;
