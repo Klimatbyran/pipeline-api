@@ -101,6 +101,16 @@ function buildUrlMapKey(env: string, sourceUrl: string): string {
   return `pdf:urlmap:${env}:${sha1Hex(sourceUrl)}`;
 }
 
+/** Basename from a PDF URL for optional object-metadata tracing (not for dedupe). */
+function filenameHintFromPdfUrl(url: string): string | undefined {
+  try {
+    const name = decodeURIComponent(new URL(url).pathname.split("/").pop() ?? "");
+    return name.replace(/[#?].*$/, "") || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function cachePdfFromUrl(sourceUrl: string): Promise<PdfCacheEntry> {
   const env = getUploadEnv();
   const redis = getRedisClient();
@@ -118,7 +128,10 @@ export async function cachePdfFromUrl(sourceUrl: string): Promise<PdfCacheEntry>
   }
 
   const { buffer, contentLength } = await fetchPdfToBuffer(sourceUrl, PDF_MAX_BYTES);
-  const upload: PdfUploadResult = await uploadPdfAndGetUrls(buffer, sourceUrl);
+  // Metadata is only a human trace; pass the path basename, not the full URL
+  // (signed URLs blow past S3/GCS metadata size limits after encoding).
+  const filenameHint = filenameHintFromPdfUrl(sourceUrl);
+  const upload: PdfUploadResult = await uploadPdfAndGetUrls(buffer, filenameHint);
 
   const entry: PdfCacheEntry = {
     env,
