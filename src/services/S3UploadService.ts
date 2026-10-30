@@ -84,12 +84,29 @@ function sha256Hex(buffer: Buffer): string {
   return createHash('sha256').update(buffer).digest('hex');
 }
 
+/** Keep well under S3 (2 KiB) / GCS (8 KiB) total user-metadata limits after encoding. */
+export const OBJECT_METADATA_VALUE_MAX_CHARS = 1024;
+
 /**
  * S3/GCS object user-metadata values are sent as HTTP headers and must be US-ASCII.
  * encodeURIComponent keeps a recoverable human trace for non-English filenames.
+ * Oversized values are truncated on a Unicode code-unit boundary so the result
+ * remains a valid percent-encoded prefix (never a split %XX / UTF-8 sequence).
  */
 export function encodeObjectMetadataValue(value: string): string {
-  return encodeURIComponent(value);
+  const wellFormed = value.toWellFormed();
+  let encoded = encodeURIComponent(wellFormed);
+  if (encoded.length <= OBJECT_METADATA_VALUE_MAX_CHARS) return encoded;
+
+  let lo = 0;
+  let hi = wellFormed.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    const candidate = encodeURIComponent(wellFormed.slice(0, mid));
+    if (candidate.length <= OBJECT_METADATA_VALUE_MAX_CHARS) lo = mid;
+    else hi = mid - 1;
+  }
+  return encodeURIComponent(wellFormed.slice(0, lo));
 }
 
 async function objectExists(params: { bucket: string; key: string }): Promise<boolean> {
