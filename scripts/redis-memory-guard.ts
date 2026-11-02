@@ -1,17 +1,15 @@
 /**
  * Periodic Redis memory guard for BullMQ.
  *
- * - At >= 60% of maxmemory: emit a loud alert log (and optional Discord webhook).
  * - At >= 70%: prune every non-live (terminal) pipeline run — completed,
  *   failed, skipped — so Redis can recover. Live/active runs are never removed
- *   on this path.
+ *   on this path. Discord webhook fires after with run/job counts.
  * - At >= 85%: emergency fail-safe — clear every pipeline run including live /
  *   active / waiting jobs (unlock + remove). Prefer interrupting in-flight
- *   work over Redis OOM / noeviction write failures.
+ *   work over Redis OOM / noeviction write failures. Discord webhook fires after.
  *
- * Unlike the garbo post-success prune hook (which only fires on successful /
- * no-emissions finishes) and the nightly keep-15 cron, the 70% path clears
- * *all* finished work. The 85% path goes further and kills live runs too.
+ * There is no soft alert-only band below prune — Discord only fires when a
+ * prune or force-clear actually runs.
  *
  * Runtime is bounded (see MAX_RUNTIME_MS + CronJob activeDeadlineSeconds) so a
  * hung Redis/BullMQ connection cannot block every future scheduled run forever
@@ -20,7 +18,6 @@
 import { getRedisClient, waitForRedisReady } from '../src/lib/redis-client'
 import { getRedisMemorySnapshot } from '../src/lib/redisMemory'
 import {
-  DEFAULT_REDIS_MEMORY_ALERT_RATIO,
   DEFAULT_REDIS_MEMORY_FORCE_CLEAR_RATIO,
   DEFAULT_REDIS_MEMORY_PRUNE_RATIO,
   evaluateRedisMemoryGuard,
@@ -38,9 +35,6 @@ import type { PruneRunsResult } from '../src/services/RunRetentionService'
  */
 const MAX_RUNTIME_MS = 8 * 60 * 1000
 const WEBHOOK_TIMEOUT_MS = 8_000
-const ALERT_COOLDOWN_KEY = 'pipeline-api:redis-memory-guard:alert'
-/** Default: at most one Discord webhook per hour while stuck in alert-only band. */
-const DEFAULT_ALERT_COOLDOWN_SECONDS = 60 * 60
 
 type WebhookPostResult = 'ok' | 'failed' | 'skipped_no_url'
 
@@ -50,16 +44,6 @@ function readRatioEnv(name: string, fallback: number): number {
   const value = Number(raw)
   if (!Number.isFinite(value) || value <= 0 || value > 1) {
     throw new Error(`${name} must be a number in (0, 1], got ${raw}`)
-  }
-  return value
-}
-
-function readPositiveIntEnv(name: string, fallback: number): number {
-  const raw = process.env[name]
-  if (raw == null || raw.trim() === '') return fallback
-  const value = Number(raw)
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new Error(`${name} must be a positive integer, got ${raw}`)
   }
   return value
 }
@@ -105,24 +89,6 @@ async function postAlertWebhook(message: string): Promise<WebhookPostResult> {
   }
 }
 
-/**
- * Claim the Discord alert slot for this cooldown window (SET NX EX).
- * Returns true if this run should post the webhook.
- */
-async function claimAlertWebhookSlot(
-  redis: ReturnType<typeof getRedisClient>,
-  cooldownSeconds: number,
-): Promise<boolean> {
-  const result = await redis.set(
-    ALERT_COOLDOWN_KEY,
-    new Date().toISOString(),
-    'EX',
-    cooldownSeconds,
-    'NX',
-  )
-  return result === 'OK'
-}
-
 function formatPruneResultLine(result: PruneRunsResult): string {
   return [
     `runs cleared ${result.runsPruned}`,
@@ -132,10 +98,6 @@ function formatPruneResultLine(result: PruneRunsResult): string {
 }
 
 async function main() {
-  const alertRatio = readRatioEnv(
-    'REDIS_MEMORY_ALERT_RATIO',
-    DEFAULT_REDIS_MEMORY_ALERT_RATIO,
-  )
   const pruneRatio = readRatioEnv(
     'REDIS_MEMORY_PRUNE_RATIO',
     DEFAULT_REDIS_MEMORY_PRUNE_RATIO,
@@ -143,10 +105,6 @@ async function main() {
   const forceClearRatio = readRatioEnv(
     'REDIS_MEMORY_FORCE_CLEAR_RATIO',
     DEFAULT_REDIS_MEMORY_FORCE_CLEAR_RATIO,
-  )
-  const alertCooldownSeconds = readPositiveIntEnv(
-    'REDIS_MEMORY_ALERT_COOLDOWN_SECONDS',
-    DEFAULT_ALERT_COOLDOWN_SECONDS,
   )
   const dryRun = process.argv.includes('--dry-run')
   const discordConfigured = webhookConfigured()
@@ -156,7 +114,6 @@ async function main() {
   await waitForRedisReady(redis)
   const snapshot = await getRedisMemorySnapshot(redis)
   const decision = evaluateRedisMemoryGuard(snapshot, {
-    alertRatio,
     pruneRatio,
     forceClearRatio,
   })
@@ -168,7 +125,6 @@ async function main() {
     used: formatMemoryMiB(decision.usedMemoryBytes),
     max: formatMemoryMiB(decision.maxMemoryBytes),
     ratio: ratioLabel,
-    alertRatio,
     pruneRatio,
     forceClearRatio,
     dryRun,
@@ -184,32 +140,6 @@ async function main() {
       // ignore
     }
     process.exit(0)
-  }
-
-  // Soft alert band (below prune): Discord at most once per cooldown.
-  if (
-    decision.shouldAlert &&
-    !decision.shouldPruneAllTerminal &&
-    !decision.shouldForceClearAll
-  ) {
-    const message = [
-      '🚨 Redis memory pressure',
-      `${ratioLabel} used (${formatMemoryMiB(decision.usedMemoryBytes)} / ${formatMemoryMiB(decision.maxMemoryBytes)})`,
-      `≥ ${formatRatioPercent(alertRatio)} alert threshold`,
-      dryRun ? '(dry-run)' : '',
-    ]
-      .filter(Boolean)
-      .join(' · ')
-
-    console.error(`[RedisMemoryGuard] ALERT ${message}`)
-
-    if (await claimAlertWebhookSlot(redis, alertCooldownSeconds)) {
-      await postAlertWebhook(message)
-    } else {
-      console.info(
-        `[RedisMemoryGuard] Discord webhook suppressed (cooldown ${alertCooldownSeconds}s)`,
-      )
-    }
   }
 
   if (decision.shouldForceClearAll) {
@@ -245,7 +175,7 @@ async function main() {
       .join(' · ')
     console.error(`[RedisMemoryGuard] ALERT ${message}`)
     await postAlertWebhook(message)
-  } else if (!decision.shouldAlert) {
+  } else {
     console.info('[RedisMemoryGuard] below prune threshold; no prune')
   }
 
