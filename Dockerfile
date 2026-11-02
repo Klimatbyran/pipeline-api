@@ -1,5 +1,5 @@
 # Use Node.js with alpine for a lightweight environment
-FROM node:lts-alpine3.20 AS base
+FROM node:22.23.4-alpine3.23 AS base
 
 # Set working directory
 WORKDIR /app
