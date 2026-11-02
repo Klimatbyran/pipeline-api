@@ -39,21 +39,17 @@ spec:
                       key: redis-password
                 - name: REDIS_HOST
                   value: redis-master.garbo-stage.svc.cluster.local
-                - name: REDIS_MEMORY_ALERT_RATIO
-                  value: "0.6"
                 - name: REDIS_MEMORY_PRUNE_RATIO
                   value: "0.7"
                 - name: REDIS_MEMORY_FORCE_CLEAR_RATIO
                   value: "0.85"
-                # Optional Discord incoming webhook for >=60% alerts (throttled).
+                # Optional Discord incoming webhook for prune / force-clear only.
                 - name: REDIS_MEMORY_ALERT_WEBHOOK_URL
                   valueFrom:
                     secretKeyRef:
                       name: env
                       key: REDIS_MEMORY_ALERT_WEBHOOK_URL
                       optional: true
-                - name: REDIS_MEMORY_ALERT_COOLDOWN_SECONDS
-                  value: "3600"
                 - name: NODE_ENV
                   valueFrom:
                     secretKeyRef:
