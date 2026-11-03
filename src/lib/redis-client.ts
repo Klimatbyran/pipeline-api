@@ -27,10 +27,10 @@ export function getRedisClient(): Redis {
 /**
  * Wait until the ioredis client is ready to accept commands.
  *
- * Required for one-shot CronJobs when `enableOfflineQueue` is false: the
- * first command (e.g. `INFO memory`) can race the TCP/auth handshake and
- * throw "Stream isn't writeable and enableOfflineQueue options is false",
- * failing the Job in a few seconds.
+ * Required when `enableOfflineQueue` is false: the first command can race
+ * the TCP/auth handshake (or a reconnect) and throw
+ * "Stream isn't writeable and enableOfflineQueue options is false".
+ * Used by redis-memory-guard and PDF URL-map cache before GET/SET.
  */
 export async function waitForRedisReady(
   redis: Pick<Redis, "status" | "once" | "off">,
