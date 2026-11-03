@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { PDF_MAX_BYTES, uploadPdfAndGetUrls, type PdfUploadResult } from "./S3UploadService";
-import { getRedisClient } from "../lib/redis-client";
+import { getRedisClient, waitForRedisReady } from "../lib/redis-client";
 import {
   assertBufferLooksLikePdf,
   assertUrlSafeForServerFetch,
@@ -114,6 +114,10 @@ function filenameHintFromPdfUrl(url: string): string | undefined {
 export async function cachePdfFromUrl(sourceUrl: string): Promise<PdfCacheEntry> {
   const env = getUploadEnv();
   const redis = getRedisClient();
+  // enableOfflineQueue:false — redis.get/set throw immediately while the
+  // socket is still connecting/reconnecting. Wait for ready first (same as
+  // redis-memory-guard) so upload/cachePdf does not fail the race.
+  await waitForRedisReady(redis);
   const urlKey = buildUrlMapKey(env, sourceUrl);
   const TTL_SECONDS = 14 * 24 * 60 * 60; // 14 days
 
