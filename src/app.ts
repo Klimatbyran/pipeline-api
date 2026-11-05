@@ -15,7 +15,7 @@ import { readProcessRoute } from './routes/readProcess'
 import { readPipelineRoute } from './routes/readPipeline'
 import { internalPruneRunsRoute } from './routes/internalPruneRuns'
 import { clearRunsRoute } from './routes/clearRuns'
-import { validateJWT } from './middleware/auth'
+import { normalizeRequestPath, validateJWT } from './middleware/auth'
 
 async function startApp() {
   const app = Fastify({logger: true})
@@ -55,24 +55,17 @@ async function startApp() {
     transform: jsonSchemaTransform,
   })
 
-  // Apply JWT authentication to write operations only (POST, PUT, PATCH, DELETE)
-  // Read operations (GET) are unprotected - frontend handles auth for UX
-  // Public endpoints: /api/health, /api/export/openapi.json, /api (Scalar UI)
+  // JWT on all methods for protected API routes. Public: /api/health, openapi export, Scalar UI (/api).
+  // /api/internal uses x-internal-service-token on route preHandlers, not JWT.
+  // NODE_ENV=development skips JWT for local DX; staging/production must not use development.
   app.addHook('onRequest', async (request, reply) => {
-    const url = request.url;
-    const method = request.method;
-    
-    // Public endpoints that never require authentication
+    const path = normalizeRequestPath(request.url);
+
     const publicPaths = [
       '/api/health',
       '/api/export/openapi.json',
     ];
-    
-    // Write methods that require authentication
-    const writeMethods = ['POST', 'PUT', 'PATCH', 'DELETE'];
-    const isWriteOperation = writeMethods.includes(method);
-    
-    // Protected route patterns (queues, processes, pipeline, cache-pdf)
+
     const protectedRoutePatterns = [
       '/api/queues',
       '/api/processes',
@@ -81,22 +74,25 @@ async function startApp() {
       '/api/cache-pdf',
       '/api/internal',
     ];
-    
-    // Check if this is a public endpoint
-    const isPublicPath = publicPaths.some(path => url === path || url.startsWith(path + '/'));
-    
-    // Check if this is a protected route
-    const isProtectedRoute = protectedRoutePatterns.some(pattern => 
-      url.startsWith(pattern + '/') || url === pattern
-    );
-    
-    // Internal service routes use x-internal-service-token (not JWT)
-    const isInternalServicePath = url.startsWith('/api/internal');
 
-    // Apply JWT validation only to write operations on protected routes
-    // Skip in development to allow local testing without a JWT secret
+    const isPublicPath = publicPaths.some(
+      (publicPath) => path === publicPath || path.startsWith(publicPath + '/')
+    );
+
+    const isProtectedRoute = protectedRoutePatterns.some(
+      (pattern) => path === pattern || path.startsWith(pattern + '/')
+    );
+
+    const isInternalServicePath =
+      path === '/api/internal' || path.startsWith('/api/internal/');
+
     const isDevelopment = process.env.NODE_ENV === 'development';
-    if (!isDevelopment && isWriteOperation && isProtectedRoute && !isPublicPath && !isInternalServicePath) {
+    if (
+      !isDevelopment &&
+      isProtectedRoute &&
+      !isPublicPath &&
+      !isInternalServicePath
+    ) {
       await validateJWT(request, reply);
     }
   });
