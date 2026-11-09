@@ -72,7 +72,6 @@ async function startApp() {
       '/api/pipeline',
       '/api/runs',
       '/api/cache-pdf',
-      '/api/internal',
     ];
 
     const isPublicPath = publicPaths.some(
@@ -83,6 +82,7 @@ async function startApp() {
       (pattern) => path === pattern || path.startsWith(pattern + '/')
     );
 
+    // /api/internal/* uses x-internal-service-token on route preHandlers (not JWT).
     const isInternalServicePath =
       path === '/api/internal' || path.startsWith('/api/internal/');
 
@@ -94,6 +94,7 @@ async function startApp() {
       !isInternalServicePath
     ) {
       await validateJWT(request, reply);
+      if (reply.sent) return;
     }
   });
 
