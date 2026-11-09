@@ -40,7 +40,7 @@ The following environment variables are available:
 - `PORT`: API port (default: `3001`)
 
 **Optional:**
-- `JWT_SECRET`: Secret key for JWT token validation. Must match the secret used by the main auth API (`api.klimatkollen.se`). **Only required for write operations (POST, PUT, PATCH, DELETE). GET requests work without it.**
+- `JWT_SECRET`: Secret key for JWT token validation. Must match the secret used by the main auth API (`api.klimatkollen.se`). **Required for all methods on protected routes** when `NODE_ENV` is not `development`. Staging/production must not run with `NODE_ENV=development`.
 - `REDIS_PASSWORD`: Redis password (optional)
 - `API_BASE_URL`: Base URL for the API (default: `http://localhost:3001`)
 
@@ -148,40 +148,36 @@ Active/waiting jobs are never removed. Use Goffer Jobbstatus for the UI, or call
 
 ## Authentication
 
-The API uses JWT (JSON Web Token) authentication to protect **write operations only** (POST, PUT, PATCH, DELETE). This prevents unauthorized pipeline triggers and modifications.
+The API uses JWT (JSON Web Token) authentication on **all HTTP methods** for protected route prefixes. That blocks anonymous reads of queue/process state as well as unauthorized pipeline triggers.
+
+When `NODE_ENV=development`, the global JWT gate is skipped for local DX. Deployed staging/production must not use `NODE_ENV=development`.
 
 ### Protected Operations
 
-**Write operations** (POST, PUT, PATCH, DELETE) on the following paths require authentication:
-- `POST /api/queues/:name` - Add jobs to queues
-- `POST /api/queues/:name/:id/rerun` - Re-run jobs
-- `POST /api/queues/:name/:id/rerun-and-save` - Re-run and save emissions
-- `POST /api/queues/rerun-by-worker` - Bulk re-run operations
-- `POST /api/runs/clear` - Clear finished BullMQ runs from Redis (staff / Goffer)
-- Any other write operations on `/api/queues/*`, `/api/processes/*`, `/api/pipeline/*`, or `/api/runs/*`
+All methods under these prefixes require `Authorization: Bearer <jwt>` (except in development):
 
-### Unprotected Operations
+- `/api/queues/*` — list/add/rerun jobs, uploads, etc.
+- `/api/processes/*` — process/company status reads
+- `/api/pipeline/*` — pipeline status reads
+- `/api/runs/*` — e.g. `POST /api/runs/clear`
+- `/api/cache-pdf` — PDF cache writes
 
-**Read operations** (GET) are **not protected** by backend authentication:
-- All `GET` endpoints are publicly accessible
-- Frontend handles authentication for read operations (UX only)
-- This allows easier debugging and inspection of pipeline state
+`/api/internal/*` does **not** use JWT; those routes use `x-internal-service-token` on the route `preHandler` (e.g. prune-runs cron).
 
 ### Always Public Endpoints
 
 The following endpoints never require authentication:
-- `/api/health` - Health check
-- `/api/export/openapi.json` - OpenAPI specification export
-- `/api` - API documentation (Scalar UI)
+
+- `/api/health` — Health check
+- `/api/export/openapi.json` — OpenAPI specification export
+- `/api` — API documentation (Scalar UI)
 
 ### Using the API
 
-Protected write operations require a JWT token in the `Authorization` header:
+Protected operations require a JWT token in the `Authorization` header:
 
 ```
 Authorization: Bearer <your-jwt-token>
 ```
 
 If a token is missing, invalid, or expired, the API will return a `401 Unauthorized` response.
-
-**Note**: Read operations (GET) do not require authentication tokens, but the frontend may still require login for user experience

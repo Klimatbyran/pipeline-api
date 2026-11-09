@@ -4,10 +4,11 @@ This API supports **full caching** of PDFs into object storage so the pipeline c
 
 ## Authentication
 
-Queue **write** operations (`POST` / `PUT` / `PATCH` / `DELETE` under `/api/queues`, `/api/processes`, `/api/pipeline`) require a valid **JWT** in the `Authorization: Bearer …` header whenever `NODE_ENV` is not `development` (see `src/app.ts`). That includes:
+All methods under `/api/queues`, `/api/processes`, `/api/pipeline`, `/api/runs`, and `/api/cache-pdf` require a valid **JWT** in the `Authorization: Bearer …` header whenever `NODE_ENV` is not `development` (see `src/app.ts`). That includes:
 
 - `POST /api/queues/parsePdf/upload`
 - `POST /api/queues/parsePdf` (including `cachePdf: true`)
+- Related `GET` status/list endpoints under those prefixes
 
 `cachePdf` performs **server-side HTTP fetches** from user-supplied URLs. JWT limits anonymous abuse, but you should still treat callers as **trusted** for outbound network policy, or extend URL validation (this codebase blocks private/reserved IPs, credentials in URLs, and non-http(s) schemes—see `src/lib/outbound-pdf-url.ts`).
 
