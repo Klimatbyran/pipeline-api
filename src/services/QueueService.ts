@@ -114,6 +114,10 @@ export class QueueService {
      * `processList` drops markdown-sized returnvalues and keeps only the
      * job.data fields process/company views need. Full payloads stay on
      * getJobData / queue detail and callers that parse fiscalYear etc.
+     *
+     * processList also scans queues/statuses sequentially (like retention)
+     * and never calls per-job getState / keeps stacktrace+opts — those were
+     * OOMing pipeline-api pods on GET /processes/companies in prod.
      */
     payload: "full" | "processList" = "full",
   ): Promise<DataJob[]> {
@@ -121,6 +125,16 @@ export class QueueService {
       queueNames = Object.values(QUEUE_NAMES);
     }
     const queryStatus = status ? [status] : JOB_STATUS;
+
+    if (payload === "processList") {
+      return this.getProcessListDataJobs(
+        queueNames,
+        queryStatus,
+        processId,
+        batchId,
+        includeCallbackJobs,
+      );
+    }
 
     const results = await Promise.all(
       queueNames.map(async (queueName) => {
@@ -143,22 +157,13 @@ export class QueueService {
           );
           if (page.length === 0) break;
 
-          const filtered = page.filter((job) => {
-            // Jobs with a callbackUrl hand off to a different pipeline
-            // entirely (e.g. climate-plans-pipeline) and never go through
-            // precheck/company resolution, so they don't belong in any
-            // company/process view — they'd otherwise show up as an
-            // "unknown" company. Still visible via the raw per-queue job
-            // list (getJobs), just not here. includeCallbackJobs opts back
-            // in for callers that specifically want those jobs (e.g. a
-            // threadId lookup for a callbackUrl-handed-off document).
-            if (!includeCallbackJobs && (job.data as any)?.callbackUrl)
-              return false
-            if (processId && job.data?.threadId !== processId) return false;
-            if (batchId != null && (job.data as any)?.batchId !== batchId)
-              return false;
-            return true;
-          });
+          const filtered = page.filter((job) =>
+            matchesDataJobFilters(job, {
+              includeCallbackJobs,
+              processId,
+              batchId,
+            }),
+          );
 
           rawJobs.push(...filtered);
           if (page.length < PAGE_SIZE) break;
@@ -168,16 +173,8 @@ export class QueueService {
         return Promise.all(
           rawJobs.map(async (job) => {
             const dataJob: DataJob = await transformJobtoBaseJob(job);
-            if (payload === "processList") {
-              dataJob.data = slimProcessListJobData(job.data);
-              dataJob.returnvalue = slimProcessListReturnValue(
-                queueName,
-                job.returnvalue,
-              );
-            } else {
-              dataJob.data = job.data;
-              dataJob.returnvalue = job.returnvalue;
-            }
+            dataJob.data = job.data;
+            dataJob.returnvalue = job.returnvalue;
             return dataJob;
           }),
         );
@@ -185,6 +182,66 @@ export class QueueService {
     );
 
     return results.flat();
+  }
+
+  /**
+   * Memory-bounded scan for process/company list endpoints.
+   *
+   * Same filter semantics as the full getDataJobs path, but:
+   * - one queue and one status at a time (no Promise.all fan-out)
+   * - status taken from the BullMQ list being scanned (no getState)
+   * - page is slimmed immediately; full Job objects are not retained
+   * - stacktrace / opts / markdown returnvalues are dropped
+   */
+  private async getProcessListDataJobs(
+    queueNames: string[],
+    queryStatus: string[],
+    processId?: string,
+    batchId?: string,
+    includeCallbackJobs = false,
+  ): Promise<DataJob[]> {
+    const PAGE_SIZE = 100;
+    const jobs: DataJob[] = [];
+
+    for (const queueName of queueNames) {
+      const queue = await this.getQueue(queueName);
+      const counts = await queue.getJobCounts(...(queryStatus as JobType[]));
+      if (Object.values(counts).every((c) => c === 0)) continue;
+
+      for (const jobStatus of queryStatus) {
+        if ((counts[jobStatus] ?? 0) === 0) continue;
+
+        let start = 0;
+        while (true) {
+          const page = await queue.getJobs(
+            [jobStatus as JobType],
+            start,
+            start + PAGE_SIZE - 1,
+          );
+          if (page.length === 0) break;
+
+          for (const job of page) {
+            if (
+              !matchesDataJobFilters(job, {
+                includeCallbackJobs,
+                processId,
+                batchId,
+              })
+            ) {
+              continue;
+            }
+            jobs.push(
+              processListDataJobFromBullJob(job, queueName, jobStatus),
+            );
+          }
+
+          if (page.length < PAGE_SIZE) break;
+          start += PAGE_SIZE;
+        }
+      }
+    }
+
+    return jobs;
   }
 
   /**
@@ -1122,6 +1179,107 @@ export class QueueService {
       }
     }
   }
+}
+
+function matchesDataJobFilters(
+  job: Pick<Job, "data">,
+  options: {
+    includeCallbackJobs: boolean;
+    processId?: string;
+    batchId?: string;
+  },
+): boolean {
+  // Jobs with a callbackUrl hand off to a different pipeline entirely
+  // (e.g. climate-plans-pipeline) and never go through precheck/company
+  // resolution, so they don't belong in any company/process view — they'd
+  // otherwise show up as an "unknown" company. Still visible via the raw
+  // per-queue job list (getJobs). includeCallbackJobs opts back in for
+  // callers that specifically want those jobs (e.g. a threadId lookup for
+  // a callbackUrl-handed-off document).
+  if (!options.includeCallbackJobs && (job.data as any)?.callbackUrl) {
+    return false;
+  }
+  if (options.processId && job.data?.threadId !== options.processId) {
+    return false;
+  }
+  if (
+    options.batchId != null &&
+    (job.data as any)?.batchId !== options.batchId
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Build a process-list DataJob without Redis getState or heavy fields.
+ * Status comes from the BullMQ list being scanned (same approach as retention).
+ */
+export function processListDataJobFromBullJob(
+  job: Job,
+  queueName: string,
+  status: string,
+): DataJob {
+  const data = job.data as Record<string, unknown> | undefined;
+  return {
+    name: job.name,
+    queue: queueName,
+    id: job.id,
+    url: typeof data?.url === "string" ? data.url : undefined,
+    autoApprove: Boolean(data?.autoApprove),
+    processId: typeof data?.threadId === "string" ? data.threadId : undefined,
+    threadId: typeof data?.threadId === "string" ? data.threadId : undefined,
+    timestamp: job.timestamp,
+    processedOn:
+      typeof job.processedOn === "number" ? job.processedOn : undefined,
+    processedBy: job.processedBy,
+    finishedOn: job.finishedOn,
+    attemptsMade: job.attemptsMade,
+    failedReason: job.failedReason,
+    // Intentionally omit stacktrace + opts — they dominate heap on company list.
+    progress: typeof job.progress === "number" ? job.progress : undefined,
+    approval: slimProcessListApproval(data?.approval),
+    delay: job.delay,
+    status: status as JobType,
+    data: slimProcessListJobData(data),
+    returnvalue: slimProcessListReturnValue(queueName, job.returnvalue),
+  };
+}
+
+/**
+ * Company-list grouping only needs approved companyLink displayName.
+ * Drop oldValue / bulky newValue blobs from the list payload.
+ */
+export function slimProcessListApproval(
+  approval: unknown,
+): DataJob["approval"] | undefined {
+  if (!approval || typeof approval !== "object") return undefined;
+  const value = approval as Record<string, unknown>;
+  if (value.type !== "companyLink") return undefined;
+
+  const data =
+    value.data && typeof value.data === "object"
+      ? (value.data as Record<string, unknown>)
+      : undefined;
+  const newValue =
+    data?.newValue && typeof data.newValue === "object"
+      ? (data.newValue as Record<string, unknown>)
+      : undefined;
+  const displayName =
+    typeof newValue?.displayName === "string"
+      ? newValue.displayName
+      : undefined;
+
+  return {
+    summary: typeof value.summary === "string" ? value.summary : "",
+    type: "companyLink",
+    approved: Boolean(value.approved),
+    data: {
+      oldValue: undefined,
+      newValue: displayName ? { displayName } : undefined,
+    },
+    metadata: {},
+  };
 }
 
 /**
