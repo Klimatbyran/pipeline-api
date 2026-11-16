@@ -1,3 +1,4 @@
+import { trimInfraQueues } from "../src/lib/infraQueueRetention";
 import {
   DEFAULT_FAILED_MAX_AGE_MS,
   DEFAULT_KEEP_SUCCESSFUL_RUN_COUNT,
@@ -90,6 +91,10 @@ async function main() {
   });
 
   console.log("Prune summary:", result);
+
+  // Infra ticks/sweeps have no threadId — run prune never sees them.
+  const infra = await trimInfraQueues({ dryRun });
+  console.log("Infra queue trim:", infra);
 }
 
 const timeout = new Promise<never>((_, reject) => {
