@@ -15,6 +15,7 @@
  * hung Redis/BullMQ connection cannot block every future scheduled run forever
  * under concurrencyPolicy: Forbid — same failure mode as prune-runs-by-company.
  */
+import { trimInfraQueues } from '../src/lib/infraQueueRetention'
 import { getRedisClient, waitForRedisReady } from '../src/lib/redis-client'
 import { getRedisMemorySnapshot } from '../src/lib/redisMemory'
 import {
@@ -132,8 +133,19 @@ async function main() {
     skipReason: decision.skipReason,
   })
 
+  // Trim threadId-less infra queues first. Run prune never sees them, and under
+  // memory pressure freeing tick/sweep backlog before a heavy prune reduces the
+  // chance Redis rejects writes mid-prune (maxmemory + noeviction).
+  // Trim failures must not abort the cron — log and continue to run prune.
+  try {
+    const infra = await trimInfraQueues({ dryRun })
+    console.info('[RedisMemoryGuard] infra queue trim', infra)
+  } catch (error) {
+    console.error('[RedisMemoryGuard] infra queue trim failed', error)
+  }
+
   if (decision.skipReason) {
-    console.warn(`[RedisMemoryGuard] skipping: ${decision.skipReason}`)
+    console.warn(`[RedisMemoryGuard] skipping run prune: ${decision.skipReason}`)
     try {
       await redis.quit()
     } catch {

@@ -1,3 +1,4 @@
+import { trimInfraQueues } from "../src/lib/infraQueueRetention";
 import {
   DEFAULT_FAILED_MAX_AGE_MS,
   DEFAULT_KEEP_SUCCESSFUL_RUN_COUNT,
@@ -90,6 +91,22 @@ async function main() {
   });
 
   console.log("Prune summary:", result);
+
+  // Infra ticks/sweeps have no company/threadId. Skip when the operator scoped
+  // prune to one company — global infra trim would be a surprise side effect.
+  // Trim failures must not fail the cron after a successful run prune.
+  if (company) {
+    console.log(
+      "Skipping infra queue trim (company-scoped prune; infra has no company)",
+    );
+  } else {
+    try {
+      const infra = await trimInfraQueues({ dryRun });
+      console.log("Infra queue trim:", infra);
+    } catch (error) {
+      console.error("Infra queue trim failed:", error);
+    }
+  }
 }
 
 const timeout = new Promise<never>((_, reject) => {
