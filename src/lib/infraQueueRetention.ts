@@ -5,11 +5,16 @@ import redis from "../config/redis";
  * Garbo infra queues have no threadId, so RunRetentionService never touches
  * them. Cap completed/failed jobs here so they cannot fill Redis under
  * maxmemory + noeviction when per-job removeOnComplete fails to fire.
+ *
+ * Keep counts in sync with garbo `src/lib/infraQueueRetention.ts`.
  */
 export const INFRA_QUEUE_RETENTION = {
   pipelineAutoRun: { keepCompleted: 20, keepFailed: 50 },
   chromaSweep: { keepCompleted: 24, keepFailed: 50 },
 } as const;
+
+/** Cap removals per status per cron pass — huge tick backlogs must not OOM. */
+export const INFRA_TRIM_BATCH_SIZE = 500;
 
 export type InfraQueueTrimResult = {
   queue: string;
@@ -17,35 +22,43 @@ export type InfraQueueTrimResult = {
   failedRemoved: number;
   completedRemaining: number;
   failedRemaining: number;
+  error?: string;
 };
 
-async function trimJobSet(
+/** @internal exported for unit tests */
+export async function trimJobSet(
   queue: Queue,
   status: "completed" | "failed",
   keep: number,
-): Promise<number> {
+  batchSize = INFRA_TRIM_BATCH_SIZE,
+): Promise<{ removed: number; failures: number }> {
   const counts = await queue.getJobCounts(status);
   const total = counts[status] ?? 0;
   const excess = total - keep;
-  if (excess <= 0) return 0;
+  if (excess <= 0) return { removed: 0, failures: 0 };
 
+  const toRemove = Math.min(excess, batchSize);
   // asc:true → oldest first for scored finished sets.
-  const oldest = await queue.getJobs([status], 0, excess - 1, true);
+  const oldest = await queue.getJobs([status], 0, toRemove - 1, true);
   let removed = 0;
+  let failures = 0;
   for (const job of oldest) {
     try {
       await job.remove();
       removed += 1;
-    } catch (error) {
-      console.error("[infraQueueRetention] failed to remove job", {
-        queue: queue.name,
-        status,
-        jobId: job.id,
-        error,
-      });
+    } catch {
+      failures += 1;
     }
   }
-  return removed;
+  if (failures > 0) {
+    console.warn("[infraQueueRetention] some jobs could not be removed", {
+      queue: queue.name,
+      status,
+      failures,
+      removed,
+    });
+  }
+  return { removed, failures };
 }
 
 export async function trimInfraQueues(
@@ -71,15 +84,15 @@ export async function trimInfraQueues(
       let completedRemoved = 0;
       let failedRemoved = 0;
       if (!dryRun) {
-        completedRemoved = await trimJobSet(
-          queue,
-          "completed",
-          retention.keepCompleted,
-        );
-        failedRemoved = await trimJobSet(queue, "failed", retention.keepFailed);
+        completedRemoved = (
+          await trimJobSet(queue, "completed", retention.keepCompleted)
+        ).removed;
+        failedRemoved = (
+          await trimJobSet(queue, "failed", retention.keepFailed)
+        ).removed;
       } else {
-        completedRemoved = completedExcess;
-        failedRemoved = failedExcess;
+        completedRemoved = Math.min(completedExcess, INFRA_TRIM_BATCH_SIZE);
+        failedRemoved = Math.min(failedExcess, INFRA_TRIM_BATCH_SIZE);
       }
 
       const after = dryRun
@@ -99,8 +112,22 @@ export async function trimInfraQueues(
         completedRemaining: after.completed ?? 0,
         failedRemaining: after.failed ?? 0,
       });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[infraQueueRetention] queue trim failed", {
+        queue: queueName,
+        error,
+      });
+      results.push({
+        queue: queueName,
+        completedRemoved: 0,
+        failedRemoved: 0,
+        completedRemaining: -1,
+        failedRemaining: -1,
+        error: message,
+      });
     } finally {
-      await queue.close();
+      await queue.close().catch(() => undefined);
     }
   }
 
