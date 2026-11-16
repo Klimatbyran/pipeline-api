@@ -201,7 +201,10 @@ export class QueueService {
     includeCallbackJobs = false,
   ): Promise<DataJob[]> {
     const PAGE_SIZE = 100;
-    const jobs: DataJob[] = [];
+    // Dedupe by queue+id: a job can move between statuses while we scan, and
+    // BullMQ's getJobs(["waiting"]) also pulls the paused list (sanitizeJobTypes).
+    // Last write wins; JOB_STATUS order ends on later states.
+    const jobsByKey = new Map<string, DataJob>();
 
     for (const queueName of queueNames) {
       const queue = await this.getQueue(queueName);
@@ -211,10 +214,15 @@ export class QueueService {
       for (const jobStatus of queryStatus) {
         if ((counts[jobStatus] ?? 0) === 0) continue;
 
+        // Use raw "wait" so BullMQ does not also return paused jobs labeled
+        // as waiting; "paused" is scanned separately via JOB_STATUS.
+        const bullTypes: JobType[] =
+          jobStatus === "waiting" ? ["wait" as JobType] : [jobStatus as JobType];
+
         let start = 0;
         while (true) {
           const page = await queue.getJobs(
-            [jobStatus as JobType],
+            bullTypes,
             start,
             start + PAGE_SIZE - 1,
           );
@@ -230,7 +238,9 @@ export class QueueService {
             ) {
               continue;
             }
-            jobs.push(
+            if (!job.id) continue;
+            jobsByKey.set(
+              `${queueName}:${job.id}`,
               processListDataJobFromBullJob(job, queueName, jobStatus),
             );
           }
@@ -241,7 +251,7 @@ export class QueueService {
       }
     }
 
-    return jobs;
+    return [...jobsByKey.values()];
   }
 
   /**
@@ -1247,39 +1257,56 @@ export function processListDataJobFromBullJob(
 }
 
 /**
- * Company-list grouping only needs approved companyLink displayName.
- * Drop oldValue / bulky newValue blobs from the list payload.
+ * Keep approval headers Jobbstatus needs (any type: companyLink, wikidata,
+ * diff-*), but drop bulky oldValue/newValue blobs. companyLink keeps only
+ * displayName for canonical naming on the company list.
  */
 export function slimProcessListApproval(
   approval: unknown,
-): DataJob["approval"] | undefined {
+): (DataJob["approval"] & { verifiedByUserId?: string }) | undefined {
   if (!approval || typeof approval !== "object") return undefined;
   const value = approval as Record<string, unknown>;
-  if (value.type !== "companyLink") return undefined;
+  if (typeof value.type !== "string" || !value.type) return undefined;
 
-  const data =
-    value.data && typeof value.data === "object"
-      ? (value.data as Record<string, unknown>)
+  const metaIn =
+    value.metadata && typeof value.metadata === "object"
+      ? (value.metadata as Record<string, unknown>)
       : undefined;
-  const newValue =
-    data?.newValue && typeof data.newValue === "object"
-      ? (data.newValue as Record<string, unknown>)
-      : undefined;
-  const displayName =
-    typeof newValue?.displayName === "string"
-      ? newValue.displayName
-      : undefined;
+  const metadata: { comment?: string; source?: string } = {};
+  if (typeof metaIn?.comment === "string") metadata.comment = metaIn.comment;
+  if (typeof metaIn?.source === "string") metadata.source = metaIn.source;
 
-  return {
+  let newValue: Record<string, unknown> | undefined;
+  if (value.type === "companyLink") {
+    const data =
+      value.data && typeof value.data === "object"
+        ? (value.data as Record<string, unknown>)
+        : undefined;
+    const rawNew =
+      data?.newValue && typeof data.newValue === "object"
+        ? (data.newValue as Record<string, unknown>)
+        : undefined;
+    const displayName =
+      typeof rawNew?.displayName === "string" ? rawNew.displayName : undefined;
+    if (displayName) newValue = { displayName };
+  }
+
+  const slim: DataJob["approval"] & { verifiedByUserId?: string } = {
     summary: typeof value.summary === "string" ? value.summary : "",
-    type: "companyLink",
+    type: value.type,
     approved: Boolean(value.approved),
     data: {
       oldValue: undefined,
-      newValue: displayName ? { displayName } : undefined,
+      newValue,
     },
-    metadata: {},
+    metadata,
   };
+  // Jobbstatus wikidata_unverified needs this; may be stripped by response
+  // schema today, but preserve it on the in-process job object.
+  if (typeof value.verifiedByUserId === "string") {
+    slim.verifiedByUserId = value.verifiedByUserId;
+  }
+  return slim;
 }
 
 /**

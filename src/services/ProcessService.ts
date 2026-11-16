@@ -28,9 +28,8 @@ export class ProcessService {
   // once, not once per page -- cheap, safe staleness for a status view
   // (nothing here needs to be real-time to the second).
   //
-  // The processList payload path must stay memory-bounded: a parallel
-  // full-Job + getState scan previously OOM-killed prod pipeline-api
-  // pods whenever Goffer Jobbstatus hit GET /processes/companies.
+  // processList scans must stay memory-bounded: no parallel full-Job
+  // retention and no per-job getState (those OOM the API under load).
   private groupedByCompanyCache = new Map<
     string,
     { expiresAt: number; data: Promise<CompanyProcess[]> }

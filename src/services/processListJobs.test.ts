@@ -33,15 +33,61 @@ describe("slimProcessListApproval", () => {
         oldValue: undefined,
         newValue: { displayName: "Acme AB" },
       },
-      metadata: {},
+      metadata: { comment: "n/a" },
     });
   });
 
-  it("drops non-companyLink approvals", () => {
+  it("keeps pending wikidata approval headers without bulky newValue", () => {
+    const slim = slimProcessListApproval({
+      summary: "guess",
+      type: "wikidata",
+      approved: false,
+      verifiedByUserId: undefined,
+      data: {
+        oldValue: null,
+        newValue: { wikidata: { node: "Q1" }, huge: "x".repeat(5_000) },
+      },
+      metadata: { source: "guessWikidata" },
+    });
+
+    assert.deepEqual(slim, {
+      summary: "guess",
+      type: "wikidata",
+      approved: false,
+      data: { oldValue: undefined, newValue: undefined },
+      metadata: { source: "guessWikidata" },
+    });
+  });
+
+  it("keeps approved unverified wikidata marker fields", () => {
+    const slim = slimProcessListApproval({
+      summary: "auto",
+      type: "wikidata",
+      approved: true,
+      data: { oldValue: null, newValue: { wikidata: { node: "Q9" } } },
+      metadata: {},
+    });
+    assert.equal(slim?.type, "wikidata");
+    assert.equal(slim?.approved, true);
+    assert.equal(slim?.data?.newValue, undefined);
+  });
+
+  it("keeps diff-style pending approvals by type", () => {
+    const slim = slimProcessListApproval({
+      summary: "diff",
+      type: "emissions",
+      approved: false,
+      data: { oldValue: { a: 1 }, newValue: { a: 2 } },
+      metadata: {},
+    });
+    assert.equal(slim?.type, "emissions");
+    assert.equal(slim?.approved, false);
+  });
+
+  it("drops approvals without a type", () => {
     assert.equal(
       slimProcessListApproval({
-        summary: "other",
-        type: "wikidata",
+        summary: "broken",
         approved: false,
         data: { oldValue: 1, newValue: 2 },
         metadata: {},
