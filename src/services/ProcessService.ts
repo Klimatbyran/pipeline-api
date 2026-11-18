@@ -16,7 +16,7 @@ export class ProcessService {
   }
 
   // getProcessesGroupedByCompany does an unfiltered fetch across every
-  // queue (getDataJobs(undefined, ...) defaults to all ~25 queues) and
+  // queue (getDataJobs(..., "processList") defaults to all ~25 queues) and
   // regroups every job into companies, from scratch, on every call.
   // getPagedCompanyProcesses calls it fresh per page with no sharing
   // between calls -- so paging through "all companies" multiplies an
@@ -27,6 +27,9 @@ export class ProcessService {
   // a short window means a full page-through only pays for the scan
   // once, not once per page -- cheap, safe staleness for a status view
   // (nothing here needs to be real-time to the second).
+  //
+  // processList scans must stay memory-bounded: no parallel full-Job
+  // retention and no per-job getState (those OOM the API under load).
   private groupedByCompanyCache = new Map<
     string,
     { expiresAt: number; data: Promise<CompanyProcess[]> }
