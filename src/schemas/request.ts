@@ -147,7 +147,7 @@ export const addQueueJobBodySchema = z.object({
 
 export const rerunQueueJobBodySchema = z.object({
   data: z
-    .record(z.any())
+    .record(z.string(), z.any())
     .optional()
     .describe(
       'Optional job data overrides. Will merge with existing job data before re-running'

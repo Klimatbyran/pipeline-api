@@ -32,8 +32,16 @@ export function getRedisClient(): Redis {
  * "Stream isn't writeable and enableOfflineQueue options is false".
  * Used by redis-memory-guard and PDF URL-map cache before GET/SET.
  */
+type RedisReadyProbe = {
+  status: string;
+  once: (event: string | symbol, listener: (...args: any[]) => void) => unknown;
+  off: (event: string | symbol, listener: (...args: any[]) => void) => unknown;
+};
+
 export async function waitForRedisReady(
-  redis: Pick<Redis, "status" | "once" | "off">,
+  // Structural type: ioredis v6 types `once`/`off` as returning Redis, which
+  // breaks EventEmitter-based test doubles under Pick<Redis, ...>.
+  redis: RedisReadyProbe,
   options: { timeoutMs?: number } = {},
 ): Promise<void> {
   if (redis.status === "ready") return;
