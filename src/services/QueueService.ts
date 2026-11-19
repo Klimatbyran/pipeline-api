@@ -423,7 +423,8 @@ export class QueueService {
         jobId,
         currentState,
       });
-      await job.moveToWaiting();
+      // BullMQ 6 renamed moveToWaiting → moveToWait
+      await job.moveToWait();
       const newState = await job.getState();
       console.info("[QueueService] rerunJob: Job moved to waiting", {
         queueName,

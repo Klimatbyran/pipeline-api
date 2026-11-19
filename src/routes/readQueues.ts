@@ -793,7 +793,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
               .number()
               .describe('Total number of jobs that matched the criteria'),
             perQueue: z
-              .record(z.number())
+              .record(z.string(), z.number())
               .describe('Number of matched jobs per queue name'),
           }),
         },

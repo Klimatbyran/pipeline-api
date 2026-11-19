@@ -64,7 +64,8 @@ export class RunRetentionService {
     queue: Awaited<ReturnType<QueueService["getQueue"]>>,
     jobId: string,
   ): Promise<void> {
-    const client = await queue.client;
+    // BullMQ 6: raw Redis client lives on the Redis backend, not Queue
+    const client = await queue.getBackend().client;
     const jobKey = queue.toKey(jobId);
     const visited = new Set<string>();
     const stack = [jobKey];

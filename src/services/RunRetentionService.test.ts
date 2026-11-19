@@ -62,16 +62,19 @@ function createService(
         .map(toRetentionRef),
     getQueue: async (queueName: string) => ({
       toKey: (id: string) => `bull:${queueName}:${id}`,
-      client: Promise.resolve({
-        del: async (key: string) => {
-          deletedLockKeys.push(key);
-          const match = key.match(/^bull:([^:]+):(.+):lock$/);
-          if (match) {
-            locks.delete(`${match[1]}:${match[2]}`);
-          }
-          return 1;
-        },
-        smembers: async () => [] as string[],
+      // BullMQ 6: Redis client is on the backend
+      getBackend: () => ({
+        client: Promise.resolve({
+          del: async (key: string) => {
+            deletedLockKeys.push(key);
+            const match = key.match(/^bull:([^:]+):(.+):lock$/);
+            if (match) {
+              locks.delete(`${match[1]}:${match[2]}`);
+            }
+            return 1;
+          },
+          smembers: async () => [] as string[],
+        }),
       }),
       getJob: async (id: string): Promise<FakeJob | null> => {
         const key = `${queueName}:${id}`;
