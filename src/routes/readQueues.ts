@@ -511,19 +511,44 @@ export async function readQueuesRoute(app: FastifyInstance) {
           }
           try {
             const hint = hintBySourceUrl.get(url)
-            const entry = hint
-              ? {
-                  env: '',
-                  sourceUrl: url,
-                  sha256: hint.sha256,
-                  bucket: hint.bucket ?? '',
-                  key: hint.key ?? '',
-                  publicUrl: hint.publicUrl,
-                  reusedExisting: true,
-                  uploaded: false,
-                  fetchedAt: new Date().toISOString(),
+            // Only accept hints whose publicUrl is on our own storage host —
+            // otherwise a client could skip cachePdfFromUrl and enqueue an
+            // arbitrary fetch URL while keeping a municipal sourceUrl.
+            let entry: Awaited<ReturnType<typeof cachePdfFromUrl>> | null = null
+            if (hint) {
+              try {
+                const host = new URL(hint.publicUrl).hostname.toLowerCase()
+                const allowed = (
+                  process.env.PDF_CACHE_ALLOWED_HOSTS ?? 'storage.googleapis.com'
+                )
+                  .split(',')
+                  .map((h) => h.trim().toLowerCase())
+                  .filter(Boolean)
+                if (allowed.includes(host)) {
+                  entry = {
+                    env: '',
+                    sourceUrl: url,
+                    sha256: hint.sha256,
+                    bucket: hint.bucket ?? '',
+                    key: hint.key ?? '',
+                    publicUrl: hint.publicUrl,
+                    reusedExisting: true,
+                    uploaded: false,
+                    fetchedAt: new Date().toISOString(),
+                  }
+                } else {
+                  request.log.warn(
+                    { url, publicUrl: hint.publicUrl },
+                    'parsePdf pdfCacheHint rejected: untrusted publicUrl host'
+                  )
                 }
-              : await cachePdfFromUrl(url)
+              } catch {
+                request.log.warn({ url }, 'parsePdf pdfCacheHint rejected: bad publicUrl')
+              }
+            }
+            if (!entry) {
+              entry = await cachePdfFromUrl(url)
+            }
             const perUrlThreadId = randomUUID()
             const addedJob = await queueService.addJob(
               resolvedName,
