@@ -467,6 +467,7 @@ export async function readQueuesRoute(app: FastifyInstance) {
         batchId,
         tags,
         cachePdf,
+        pdfCacheHints,
         callbackUrl,
         reportTypeSlug,
         readImages,
@@ -476,6 +477,9 @@ export async function readQueuesRoute(app: FastifyInstance) {
         urlContexts,
       } = request.body
       const companyContextBody = { pipelineCompany, urlContexts }
+      const hintBySourceUrl = new Map(
+        (pdfCacheHints ?? []).map((h) => [h.sourceUrl, h] as const)
+      )
       // Log enqueue request (sanitized)
       app.log.info(
         {
@@ -506,7 +510,20 @@ export async function readQueuesRoute(app: FastifyInstance) {
             })
           }
           try {
-            const entry = await cachePdfFromUrl(url)
+            const hint = hintBySourceUrl.get(url)
+            const entry = hint
+              ? {
+                  env: '',
+                  sourceUrl: url,
+                  sha256: hint.sha256,
+                  bucket: hint.bucket ?? '',
+                  key: hint.key ?? '',
+                  publicUrl: hint.publicUrl,
+                  reusedExisting: true,
+                  uploaded: false,
+                  fetchedAt: new Date().toISOString(),
+                }
+              : await cachePdfFromUrl(url)
             const perUrlThreadId = randomUUID()
             const addedJob = await queueService.addJob(
               resolvedName,
