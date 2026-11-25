@@ -112,6 +112,22 @@ export const addQueueJobBodySchema = z.object({
     .describe(
       'When true (parsePdf only), fetch each URL and cache the PDF to S3 before enqueueing, so pipeline reads from storage instead of the source URL'
     ),
+  /** When set for a urls[] entry matching sourceUrl, skip re-fetch and enqueue
+   * from publicUrl while keeping sourceUrl as the webhook/registry identity. */
+  pdfCacheHints: z
+    .array(
+      z.object({
+        sourceUrl: z.string().url(),
+        publicUrl: z.string().url(),
+        sha256: z.string().min(1),
+        bucket: z.string().optional(),
+        key: z.string().optional(),
+      })
+    )
+    .optional()
+    .describe(
+      'Prefer an already-cached GCS PDF for matching source URLs (municipality registry Runs)'
+    ),
   callbackUrl: z
     .string()
     .url()
