@@ -4,7 +4,8 @@ metadata:
   name: pipeline-api
   annotations:
     cert-manager.io/cluster-issuer: 'letsencrypt-prod'
-    nginx.ingress.kubernetes.io/proxy-body-size: "850m"
+    # Above Goffer client batch total cap (1.4 GB) so operators hit the UI guard first.
+    nginx.ingress.kubernetes.io/proxy-body-size: "1500m"
 spec:
   ingressClassName: nginx
   tls:
