@@ -31,7 +31,7 @@ async function startApp() {
 
   await app.register(multipart, {
     limits: {
-      fileSize: PDF_MAX_BYTES, // 400 MB per file (annual reports with images)
+      fileSize: PDF_MAX_BYTES, // 800 MB per file (annual reports with images)
       files: 20,
     },
     throwFileSizeLimit: true, // reject with 413 and clear error when file exceeds limit

@@ -4,7 +4,7 @@ metadata:
   name: pipeline-api
   annotations:
     cert-manager.io/cluster-issuer: 'letsencrypt-prod'
-    nginx.ingress.kubernetes.io/proxy-body-size: "450m"
+    nginx.ingress.kubernetes.io/proxy-body-size: "850m"
 spec:
   ingressClassName: nginx
   tls:

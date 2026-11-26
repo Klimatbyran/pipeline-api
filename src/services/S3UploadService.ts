@@ -4,7 +4,7 @@ import { getS3Config } from '../config/s3';
 import { createHash } from 'crypto';
 
 /** Max size per PDF (e.g. annual reports with images). Kept in sync with multipart limit in app.ts. */
-export const PDF_MAX_BYTES = 400 * 1024 * 1024; // 400 MB per file
+export const PDF_MAX_BYTES = 800 * 1024 * 1024; // 800 MB per file
 const PDF_MIME = 'application/pdf';
 
 let client: S3Client | null = null;

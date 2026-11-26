@@ -23,6 +23,7 @@ import {
 } from '../schemas/request'
 import { z } from 'zod'
 import {
+  PDF_MAX_BYTES,
   type PdfUploadResult,
   uploadPdfAndGetUrls,
 } from '../services/S3UploadService'
@@ -357,8 +358,9 @@ export async function readQueuesRoute(app: FastifyInstance) {
             'PDF upload is not configured. Set S3_BUCKET in the environment.',
         })
       }
-      const FILE_TOO_LARGE_MSG =
-        'File too large. Maximum size is 400 MB per file.'
+      const FILE_TOO_LARGE_MSG = `File too large. Maximum size is ${
+        PDF_MAX_BYTES / 1024 / 1024
+      } MB per file.`
       const queueService = await QueueService.getQueueService()
       let options: {
         autoApprove?: boolean
